@@ -176,13 +176,12 @@
       overflow: hidden; border-bottom: 1px solid var(--border);
       background: var(--surface); padding: 9px 0; position: relative; z-index: 1;
     }
-    .ticker { display: flex; animation: tickerScroll 40s linear infinite; white-space: nowrap; }
-    .ticker:hover { animation-play-state: paused; }
-    @keyframes tickerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+    .ticker { display: flex; white-space: nowrap; will-change: transform; }
+    .ticker:hover { /* pause handled in JS */ }
     .ticker-item {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 0 22px; font-family: var(--font-mono); font-size: 0.72rem;
-      border-right: 1px solid var(--border);
+      border-right: 1px solid var(--border); flex-shrink: 0;
     }
     .ticker-sym { font-weight: 700; }
     .ticker-icon { width: 15px; height: 15px; border-radius: 50%; object-fit: contain; }
@@ -1778,53 +1777,66 @@ function restoreAllPortfolios() {
 
 function renderAll() { renderTicker(); renderSummary(); renderTable(); }
 
+// ── Ticker rAF scroller ──
+let tickerX       = 0;
+let tickerRAF     = null;
+let tickerPaused  = false;
+const TICKER_SPEED = 0.4; // px per frame (~24px/s at 60fps)
+
+function startTickerLoop() {
+  if (tickerRAF) return; // already running
+  const el = document.getElementById('ticker');
+  if (!el) return;
+
+  // Pause on hover
+  el.addEventListener('mouseenter', () => { tickerPaused = true;  });
+  el.addEventListener('mouseleave', () => { tickerPaused = false; });
+
+  function tick() {
+    tickerRAF = requestAnimationFrame(tick);
+    if (tickerPaused) return;
+    const el   = document.getElementById('ticker');
+    const half = el.scrollWidth / 2;
+    if (half <= 0) return;
+    tickerX -= TICKER_SPEED;
+    // When we've scrolled exactly one full copy, wrap back silently
+    if (Math.abs(tickerX) >= half) tickerX += half;
+    el.style.transform = `translateX(${tickerX}px)`;
+  }
+  tick();
+}
+
 function renderTicker() {
   const coins = Object.values(coinCache).filter(c => c.price > 0);
   if (!coins.length) return;
   const sym = activeCurrency.symbol;
   const el  = document.getElementById('ticker');
 
-  // Build a fingerprint of current coin set to detect if items changed
+  // Fingerprint: detect if coin set changed
   const fingerprint = coins.map(c => c.uuid).sort().join(',');
 
   if (el.dataset.fingerprint === fingerprint && el.children.length > 0) {
-    // Same coins — update values in-place without touching the DOM structure
-    // Items are doubled (first half + second half mirror), so update both
+    // Same coins — update values in-place, animation keeps running uninterrupted
     const items = el.querySelectorAll('.ticker-item');
     const half  = Math.floor(items.length / 2);
     coins.forEach((c, i) => {
-      const chg = c.change24h || 0;
-      const cls = chg >= 0 ? 'pos' : 'neg';
-      const val = `${sym}${fmtP(c.price)}`;
+      const chg    = c.change24h || 0;
+      const cls    = chg >= 0 ? 'pos' : 'neg';
+      const val    = `${sym}${fmtP(c.price)}`;
       const chgTxt = `${chg >= 0 ? '▲' : '▼'}${Math.abs(chg).toFixed(2)}%`;
-      // Update first half
-      const a = items[i];
-      if (a) {
-        a.querySelector('.ticker-price').textContent = val;
-        const chgEl = a.querySelector('.ticker-chg');
+      [items[i], items[i + half]].forEach(item => {
+        if (!item) return;
+        item.querySelector('.ticker-price').textContent = val;
+        const chgEl = item.querySelector('.ticker-chg');
         chgEl.textContent = chgTxt;
-        chgEl.className = 'ticker-chg ' + cls;
-      }
-      // Update second half (mirror)
-      const b = items[i + half];
-      if (b) {
-        b.querySelector('.ticker-price').textContent = val;
-        const chgEl = b.querySelector('.ticker-chg');
-        chgEl.textContent = chgTxt;
-        chgEl.className = 'ticker-chg ' + cls;
-      }
+        chgEl.className   = 'ticker-chg ' + cls;
+      });
     });
     return;
   }
 
-  // Coin set changed or first render — rebuild HTML but preserve animation position
-  // Save current animation progress so we can restore it
-  const style       = window.getComputedStyle(el);
-  const matrix      = style.transform;
-  const currentX    = matrix && matrix !== 'none'
-    ? parseFloat(matrix.split(',')[4]) : 0;
-
-  const half = [...coins, ...coins].map(c => {
+  // Coin set changed — rebuild DOM (tickerX keeps counting so no jump)
+  const makeItem = c => {
     const chg = c.change24h || 0;
     const cls = chg >= 0 ? 'pos' : 'neg';
     return `<span class="ticker-item">
@@ -1833,22 +1845,17 @@ function renderTicker() {
       <span class="ticker-price" style="color:var(--muted)">${sym}${fmtP(c.price)}</span>
       <span class="ticker-chg ${cls}">${chg >= 0 ? '▲' : '▼'}${Math.abs(chg).toFixed(2)}%</span>
     </span>`;
-  }).join('');
+  };
 
-  // Pause animation, swap content, then resume from same position
-  el.style.animation = 'none';
-  el.innerHTML = half;
+  el.innerHTML = [...coins, ...coins].map(makeItem).join('');
   el.dataset.fingerprint = fingerprint;
 
-  // Force reflow then restart animation from where it left off
-  // We calculate the equivalent animation-delay to match the current scroll position
+  // Reset X so the wrap calculation stays valid for the new content width
+  // We do this after a frame so scrollWidth is accurate
   requestAnimationFrame(() => {
-    const totalWidth = el.scrollWidth / 2; // half because content is doubled
-    const duration   = 40; // seconds — must match CSS
-    const progress   = totalWidth > 0 ? Math.abs(currentX) / totalWidth : 0;
-    const delay      = -(progress * duration);
-    el.style.animation = '';
-    el.style.animationDelay = delay + 's';
+    const half = el.scrollWidth / 2;
+    if (half > 0) tickerX = tickerX % half || 0;
+    startTickerLoop();
   });
 }
 
@@ -2038,6 +2045,7 @@ function bgClose(e,id) { if (e.target===document.getElementById(id)) closeM(id);
 syncApiBadge();
 renderPortSelect();
 renderAll();
+startTickerLoop();
 loadCurrencies();      // always runs — uses fallback if no API key
 syncCurrencySelect();  // set dropdown to match active portfolio's currency
 if (apiKey) refreshPrices();

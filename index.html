@@ -40,6 +40,7 @@
     }
   </script>
   <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -72,6 +73,54 @@
 
     @media (max-width: 768px) {
       nav { padding: 10px 14px; }
+    }
+
+    /* Mobile nav — hidden on desktop */
+    .mob-nav { display: none; }
+    .mob-menu { display: none; }
+
+    @media (max-width: 768px), (pointer: coarse) {
+      .nav-actions { display: none !important; }
+      .mob-nav {
+        display: flex; align-items: center; gap: 8px;
+      }
+      .mob-menu-btn {
+        background: var(--surface2); border: 1px solid var(--border);
+        color: var(--text); width: 36px; height: 36px; border-radius: 8px;
+        font-size: 1.1rem; display: flex; align-items: center; justify-content: center;
+        cursor: pointer; flex-shrink: 0; transition: all 0.15s;
+      }
+      .mob-menu-btn:hover, .mob-menu-btn.open { border-color: var(--accent); color: var(--accent); }
+      .mob-menu {
+        display: block; position: sticky; top: 57px; z-index: 99;
+        max-height: 0; overflow: hidden;
+        transition: max-height 0.25s ease, opacity 0.2s;
+        opacity: 0;
+        background: rgba(10,12,16,0.97); backdrop-filter: blur(16px);
+        border-bottom: 1px solid var(--border);
+      }
+      .mob-menu.open { max-height: 400px; opacity: 1; }
+      .mob-menu-inner {
+        padding: 10px 14px 14px;
+        display: flex; flex-direction: column; gap: 4px;
+      }
+      .mob-menu-item {
+        width: 100%; text-align: left; padding: 11px 14px;
+        background: transparent; border: 1px solid var(--border);
+        border-radius: 9px; color: var(--text); font-size: 0.88rem; font-weight: 600;
+        cursor: pointer; transition: all 0.13s;
+      }
+      .mob-menu-item:hover { background: var(--surface2); border-color: var(--muted); }
+      .mob-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
+      .mob-menu-cur {
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 14px; border: 1px solid var(--border); border-radius: 9px;
+      }
+      .mob-menu-label {
+        font-family: var(--font-mono); font-size: 0.65rem; color: var(--muted);
+        text-transform: uppercase; letter-spacing: 1px; white-space: nowrap;
+      }
+      .mob-menu-icon { display: flex; align-items: center; }
     }
 
     .api-badge {
@@ -267,6 +316,15 @@
     .pfill  { height: 100%; border-radius: 99px; background: var(--accent); width: 0%; transition: width 0.3s; }
     .plabel { font-family: var(--font-mono); font-size: 0.67rem; color: var(--muted); white-space: nowrap; }
 
+    /* SYNC TABS */
+    .sync-tab {
+      flex: 1; padding: 8px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: 700;
+      background: transparent; border: 1px solid var(--border); color: var(--muted);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .sync-tab:hover { color: var(--text); border-color: var(--muted); }
+    .sync-tab.active { background: var(--accent); border-color: var(--accent); color: #000; }
+
     /* SETTINGS */
     .sinfo { font-size: 0.79rem; color: var(--muted); line-height: 1.65; margin-bottom: 16px; }
     .sinfo a { color: var(--accent); text-decoration: none; }
@@ -336,7 +394,7 @@
 <!-- NAV -->
 <nav>
   <div class="logo">Crypto<span>Hodl</span></div>
-  <div class="nav-actions">
+  <div class="nav-actions" id="navActions">
     <button class="api-badge" onclick="openSettings()">
       <div class="dot" id="apiDot"></div>
       <span id="apiLabel">No API key</span>
@@ -358,7 +416,42 @@
     </div>
     <button class="btn-primary" onclick="openAdd()">+ Add Coin</button>
   </div>
+
+  <!-- Mobile-only controls (always visible) -->
+  <div class="mob-nav">
+    <div class="port-wrap" title="Switch portfolio">
+      <select class="port-select" id="portSelectMob" onchange="switchPortfolioMob()"></select>
+      <button class="port-manage-btn" onclick="openManagePortfolios()" title="Manage portfolios">⚙</button>
+    </div>
+    <button class="btn-primary" style="padding:8px 14px;font-size:0.82rem" onclick="openAdd()">+ Add</button>
+    <button class="mob-menu-btn" id="mobMenuBtn" onclick="toggleMobMenu()" title="Menu">☰</button>
+  </div>
 </nav>
+
+<!-- Mobile dropdown menu -->
+<div class="mob-menu" id="mobMenu">
+  <div class="mob-menu-inner">
+    <button class="mob-menu-item" onclick="openSettings();closeMobMenu()">
+      <span class="mob-menu-icon"><span class="dot" id="apiDotMob"></span></span>
+      <span id="apiLabelMob">No API key</span>
+    </button>
+    <div class="mob-menu-divider"></div>
+    <div class="mob-menu-cur">
+      <span class="mob-menu-label">Currency</span>
+      <div class="cur-select-wrap" title="Display currency" style="flex:1">
+        <select class="cur-select" id="curSelectMob" onchange="onCurrencyChangeMob()">
+          <option value="yhjMzLPhuIDl" data-symbol="$" data-code="USD">USD</option>
+        </select>
+        <span class="cur-chevron">▾</span>
+      </div>
+    </div>
+    <div class="mob-menu-divider"></div>
+    <button class="mob-menu-item" onclick="openSync();closeMobMenu()">⇅ Sync / Backup</button>
+    <button class="mob-menu-item" onclick="openImport();closeMobMenu()">⬆ Import JSON</button>
+    <button class="mob-menu-item" onclick="exportJSON();closeMobMenu()">⬇ Export JSON</button>
+    <button class="mob-menu-item" onclick="exportCSV();closeMobMenu()">⬇ Export CSV</button>
+  </div>
+</div>
 
 <!-- MAIN -->
 <main>
@@ -518,26 +611,28 @@
 <div class="modal-overlay" id="mSync" onclick="bgClose(event,'mSync')">
   <div class="modal" style="max-width:520px">
     <h2>⇅ Backup & Restore All Portfolios</h2>
-    <p style="font-size:0.79rem;color:var(--muted);margin:-8px 0 18px;line-height:1.7">
-      Export a single backup file containing <b>all</b> your portfolios (holdings, descriptions, buy prices, and currency preferences).
-      Copy it to another device and restore it there to sync everything at once.
-    </p>
 
-    <!-- Backup -->
-    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px">
-      <div style="font-weight:700;font-size:0.88rem;margin-bottom:6px">📤 Backup</div>
-      <div style="font-size:0.79rem;color:var(--muted);margin-bottom:12px">
-        Downloads a <code style="color:var(--accent)">.json</code> file with all portfolios. Keep it somewhere safe.
-      </div>
+    <!-- Tabs -->
+    <div style="display:flex;gap:6px;margin-bottom:18px">
+      <button class="sync-tab active" id="stab-backup"  onclick="syncTab('backup')">📤 Backup</button>
+      <button class="sync-tab"        id="stab-restore" onclick="syncTab('restore')">📥 Restore</button>
+      <button class="sync-tab"        id="stab-qr"      onclick="syncTab('qr')">📱 QR Code</button>
+    </div>
+
+    <!-- Backup panel -->
+    <div id="spanel-backup">
+      <p style="font-size:0.79rem;color:var(--muted);margin-bottom:16px;line-height:1.7">
+        Downloads a <code style="color:var(--accent)">.json</code> file containing <b>all</b> your portfolios —
+        holdings, descriptions, total spent, and currency preferences.
+      </p>
       <button class="btn-primary" style="width:100%" onclick="exportAllPortfolios()">Download Backup File</button>
     </div>
 
-    <!-- Restore -->
-    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px">
-      <div style="font-weight:700;font-size:0.88rem;margin-bottom:6px">📥 Restore</div>
-      <div style="font-size:0.79rem;color:var(--muted);margin-bottom:12px">
+    <!-- Restore panel -->
+    <div id="spanel-restore" style="display:none">
+      <p style="font-size:0.79rem;color:var(--muted);margin-bottom:16px;line-height:1.7">
         Paste the contents of your backup file below, then choose how to restore.
-      </div>
+      </p>
       <div class="fg">
         <label>Backup JSON</label>
         <textarea id="syncRestoreTA" rows="5" placeholder='{"portfolios": {...}, "activePortId": "..."}' style="font-family:var(--font-mono);font-size:0.75rem;resize:vertical"></textarea>
@@ -550,6 +645,50 @@
         </select>
       </div>
       <button class="btn-primary" style="width:100%;background:var(--green);border-color:var(--green);color:#000" onclick="restoreAllPortfolios()">Restore from Backup</button>
+    </div>
+
+    <!-- QR panel -->
+    <div id="spanel-qr" style="display:none">
+      <p style="font-size:0.79rem;color:var(--muted);margin-bottom:16px;line-height:1.7">
+        Generates a QR code from your portfolio data. Scan it on your iPhone to instantly load the data.
+        <b>Note:</b> QR codes have a ~4,000 character limit — large portfolios may not fit.
+      </p>
+
+      <!-- Portfolio selector for QR -->
+      <div class="fg">
+        <label>Which portfolio to share?</label>
+        <select id="qrPortSelect">
+          <option value="__all__">All portfolios</option>
+        </select>
+      </div>
+
+      <button class="btn-primary" style="width:100%;margin-bottom:16px" onclick="generateQR()">Generate QR Code</button>
+
+      <!-- QR output -->
+      <div id="qrOutput" style="display:none">
+        <div id="qrWrap" style="background:#fff;border-radius:12px;padding:16px;display:flex;justify-content:center;align-items:center;margin-bottom:12px">
+          <canvas id="qrCanvas"></canvas>
+        </div>
+        <div id="qrMeta" style="font-family:var(--font-mono);font-size:0.69rem;color:var(--muted);text-align:center;line-height:1.8"></div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:12px;line-height:1.65;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <b style="color:var(--text)">To import on iPhone:</b><br>
+          1. Open CryptoHodl in Safari on your iPhone<br>
+          2. Go to ⇅ Sync → QR Code tab<br>
+          3. Tap <b>Scan QR Code</b> and point at this screen
+        </div>
+      </div>
+
+      <div id="qrError" style="display:none;background:rgba(255,77,106,0.1);border:1px solid var(--red);border-radius:8px;padding:12px;font-size:0.79rem;color:var(--red);line-height:1.65"></div>
+
+      <!-- Scan button (shown on mobile) -->
+      <div id="qrScanWrap" style="display:none;margin-top:4px">
+        <button class="btn-primary" style="width:100%;background:var(--green);border-color:var(--green);color:#000" onclick="startQRScan()">📷 Scan QR Code</button>
+        <div style="margin-top:10px">
+          <video id="qrVideo" style="width:100%;border-radius:10px;display:none"></video>
+          <canvas id="qrScanCanvas" style="display:none"></canvas>
+        </div>
+        <div id="qrScanStatus" style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);margin-top:8px;text-align:center"></div>
+      </div>
     </div>
 
     <div class="mactions" style="margin-top:16px">
@@ -640,52 +779,83 @@ let searchTimer = null;
 //  PORTFOLIO MANAGEMENT
 // ════════════════════════════════════════════════════════════════════
 function renderPortSelect() {
-  const sel = document.getElementById('portSelect');
-  sel.innerHTML = Object.entries(portfolios).map(([id, p]) =>
+  const html = Object.entries(portfolios).map(([id, p]) =>
     `<option value="${esc(id)}" ${id === activePortId ? 'selected' : ''}>${esc(p.name)}</option>`
   ).join('');
+  document.getElementById('portSelect').innerHTML    = html;
+  document.getElementById('portSelectMob').innerHTML = html;
 }
 
 function switchPortfolio() {
   const newId = document.getElementById('portSelect').value;
   if (newId === activePortId) return;
-
-  // Save current state back before switching
   persistActive();
-
   activePortId   = newId;
   localStorage.setItem(ACTIVE_KEY, activePortId);
-
   holdings       = portfolios[activePortId].holdings  || [];
   coinCache      = portfolios[activePortId].coinCache || {};
   activeCurrency = portfolios[activePortId].currency  ||
                    { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' };
-
-  // Correct any stale placeholder UUIDs
   if (UUID_CORRECTIONS[activeCurrency.uuid]) {
     activeCurrency.uuid = UUID_CORRECTIONS[activeCurrency.uuid];
   }
-
-  // Update currency selector to reflect this portfolio's saved currency
+  document.getElementById('portSelectMob').value = newId;
   syncCurrencySelect();
   renderAll();
   if (apiKey) refreshPrices();
 }
 
+function switchPortfolioMob() {
+  const newId = document.getElementById('portSelectMob').value;
+  document.getElementById('portSelect').value = newId;
+  switchPortfolio();
+}
+
 function syncCurrencySelect() {
-  const sel = document.getElementById('curSelect');
-  // Try to select by uuid first, then by code
-  let matched = false;
-  for (const opt of sel.options) {
-    if (opt.value === activeCurrency.uuid || opt.dataset.code === activeCurrency.code) {
-      opt.selected = true;
-      // Sync activeCurrency symbol from the option
-      activeCurrency.symbol = opt.dataset.symbol || activeCurrency.symbol;
-      matched = true;
-      break;
+  ['curSelect','curSelectMob'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    let matched = false;
+    for (const opt of sel.options) {
+      if (opt.value === activeCurrency.uuid || opt.dataset.code === activeCurrency.code) {
+        opt.selected = true;
+        activeCurrency.symbol = opt.dataset.symbol || activeCurrency.symbol;
+        matched = true;
+        break;
+      }
     }
-  }
-  if (!matched && sel.options.length > 0) sel.options[0].selected = true;
+    if (!matched && sel.options.length > 0) sel.options[0].selected = true;
+  });
+}
+
+// ── Mobile menu ──
+function toggleMobMenu() {
+  const menu = document.getElementById('mobMenu');
+  const btn  = document.getElementById('mobMenuBtn');
+  const open = menu.classList.toggle('open');
+  btn.classList.toggle('open', open);
+  btn.textContent = open ? '✕' : '☰';
+}
+function closeMobMenu() {
+  document.getElementById('mobMenu').classList.remove('open');
+  const btn = document.getElementById('mobMenuBtn');
+  btn.classList.remove('open');
+  btn.textContent = '☰';
+}
+
+function onCurrencyChangeMob() {
+  const sel = document.getElementById('curSelectMob');
+  const opt = sel.options[sel.selectedIndex];
+  // Mirror to desktop select
+  const dSel = document.getElementById('curSelect');
+  for (const o of dSel.options) { if (o.value === sel.value) { o.selected = true; break; } }
+  activeCurrency = { uuid: sel.value, symbol: opt.dataset.symbol || '$', code: opt.dataset.code || sel.value };
+  portfolios[activePortId].currency = activeCurrency;
+  savePortfolios();
+  coinCache = {};
+  portfolios[activePortId].coinCache = {};
+  savePortfolios();
+  refreshPrices();
 }
 
 function openManagePortfolios() {
@@ -919,7 +1089,8 @@ function buildCurrencyList(apiList) {
 }
 
 function populateSelectWith(list) {
-  const sel = document.getElementById('curSelect');
+  const sel    = document.getElementById('curSelect');
+  const selMob = document.getElementById('curSelectMob');
 
   const priIdx = c => {
     const i = PRIORITY_CODES.indexOf(c.symbol);
@@ -933,36 +1104,42 @@ function populateSelectWith(list) {
   });
 
   sel.innerHTML = '';
+  if (selMob) selMob.innerHTML = '';
   let dividerAdded = false;
 
   sorted.forEach(c => {
     if (!dividerAdded && priIdx(c) === 999) {
-      const d = document.createElement('option');
-      d.disabled = true;
-      d.textContent = '──────────────';
-      sel.appendChild(d);
+      ['sel','selMob'].forEach(k => {
+        const s = k === 'sel' ? sel : selMob;
+        if (!s) return;
+        const d = document.createElement('option');
+        d.disabled = true; d.textContent = '──────────────';
+        s.appendChild(d);
+      });
       dividerAdded = true;
     }
-    const opt = document.createElement('option');
-    opt.value          = c.uuid;
-    opt.dataset.symbol = c.sign || CURRENCY_SIGNS[c.symbol] || c.symbol;
-    opt.dataset.code   = c.symbol || c.uuid;
-    opt.textContent    = c.symbol + (c.name ? ' — ' + c.name : '');
-
-    // Match by symbol code (most reliable) — UUID may have changed from placeholder
-    if (c.symbol === activeCurrency.code || c.uuid === activeCurrency.uuid) {
-      opt.selected = true;
-      // Update activeCurrency with the real UUID if we used a placeholder before
-      if (activeCurrency.uuid !== c.uuid) {
-        activeCurrency.uuid   = c.uuid;
-        activeCurrency.symbol = opt.dataset.symbol;
-        localStorage.setItem(CUR_KEY, JSON.stringify(activeCurrency));
+    const makeOpt = () => {
+      const opt = document.createElement('option');
+      opt.value          = c.uuid;
+      opt.dataset.symbol = c.sign || CURRENCY_SIGNS[c.symbol] || c.symbol;
+      opt.dataset.code   = c.symbol || c.uuid;
+      opt.textContent    = c.symbol + (c.name ? ' — ' + c.name : '');
+      if (c.symbol === activeCurrency.code || c.uuid === activeCurrency.uuid) {
+        opt.selected = true;
+        if (activeCurrency.uuid !== c.uuid) {
+          activeCurrency.uuid   = c.uuid;
+          activeCurrency.symbol = opt.dataset.symbol;
+          localStorage.setItem(CUR_KEY, JSON.stringify(activeCurrency));
+        }
       }
-    }
-    sel.appendChild(opt);
+      return opt;
+    };
+    sel.appendChild(makeOpt());
+    if (selMob) selMob.appendChild(makeOpt());
   });
 
   sel.disabled = false;
+  if (selMob) selMob.disabled = false;
   // Re-sync the active portfolio's currency after the list is (re)populated
   syncCurrencySelect();
 }
@@ -1019,14 +1196,20 @@ function onCurrencyChange() {
 //  API KEY UI
 // ════════════════════════════════════════════════════════════════════
 function syncApiBadge() {
-  const dot = document.getElementById('apiDot');
-  const lbl = document.getElementById('apiLabel');
+  const dot    = document.getElementById('apiDot');
+  const lbl    = document.getElementById('apiLabel');
+  const dotMob = document.getElementById('apiDotMob');
+  const lblMob = document.getElementById('apiLabelMob');
   if (apiKey) {
-    dot.className = 'dot on';
-    lbl.textContent = apiKey.slice(0, 8) + '…';
+    dot.className    = 'dot on';
+    if (dotMob) dotMob.className = 'dot on';
+    lbl.textContent  = apiKey.slice(0, 8) + '…';
+    if (lblMob) lblMob.textContent = 'API: ' + apiKey.slice(0, 8) + '…';
   } else {
-    dot.className = 'dot';
-    lbl.textContent = 'No API key';
+    dot.className    = 'dot';
+    if (dotMob) dotMob.className = 'dot';
+    lbl.textContent  = 'No API key';
+    if (lblMob) lblMob.textContent = 'No API key';
   }
 }
 
@@ -1292,8 +1475,153 @@ async function runImport() {
 // ════════════════════════════════════════════════════════════════════
 function openSync() {
   document.getElementById('syncRestoreTA').value = '';
+  // Reset to backup tab
+  syncTab('backup');
+  // Populate QR portfolio selector
+  const sel = document.getElementById('qrPortSelect');
+  sel.innerHTML = '<option value="__all__">All portfolios</option>';
+  Object.entries(portfolios).forEach(([id, p]) => {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = p.name || id;
+    sel.appendChild(opt);
+  });
+  // Show scan button only on touch devices
+  document.getElementById('qrScanWrap').style.display =
+    ('ontouchstart' in window) ? 'block' : 'none';
   openM('mSync');
 }
+
+function syncTab(name) {
+  ['backup','restore','qr'].forEach(t => {
+    document.getElementById('spanel-' + t).style.display = t === name ? 'block' : 'none';
+    document.getElementById('stab-'   + t).classList.toggle('active', t === name);
+  });
+  // Reset QR output when switching away
+  if (name !== 'qr') {
+    document.getElementById('qrOutput').style.display = 'none';
+    document.getElementById('qrError').style.display  = 'none';
+  }
+}
+
+const QR_MAX = 4000; // safe limit for QR version 40 with byte encoding
+
+function buildBackupPayload(portId) {
+  const clean = {};
+  const src = portId === '__all__' ? portfolios : { [portId]: portfolios[portId] };
+  Object.entries(src).forEach(([id, p]) => {
+    clean[id] = { name: p.name, holdings: p.holdings, currency: p.currency };
+  });
+  const activeId = portId === '__all__' ? activePortId : portId;
+  return JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), activePortId: activeId, portfolios: clean });
+}
+
+function generateQR() {
+  const portId  = document.getElementById('qrPortSelect').value;
+  const errEl   = document.getElementById('qrError');
+  const outEl   = document.getElementById('qrOutput');
+  const metaEl  = document.getElementById('qrMeta');
+  const wrap    = document.getElementById('qrWrap');
+
+  errEl.style.display = 'none';
+  outEl.style.display = 'none';
+
+  const payload = buildBackupPayload(portId);
+  const bytes   = new TextEncoder().encode(payload).length;
+
+  if (bytes > QR_MAX) {
+    errEl.innerHTML =
+      `⚠️ Data too large for a QR code (${bytes.toLocaleString()} bytes — limit is ~${QR_MAX.toLocaleString()}).<br><br>` +
+      `Try selecting a single portfolio instead of "All portfolios", or use the ` +
+      `<b>Download Backup File</b> option and transfer it via AirDrop / iCloud.`;
+    errEl.style.display = 'block';
+    return;
+  }
+
+  // Clear previous QR
+  wrap.innerHTML = '<div id="qrInner"></div>';
+
+  try {
+    new QRCode(document.getElementById('qrInner'), {
+      text:           payload,
+      width:          260,
+      height:         260,
+      colorDark:      '#000000',
+      colorLight:     '#ffffff',
+      correctLevel:   QRCode.CorrectLevel.M,
+    });
+    metaEl.textContent = `${bytes.toLocaleString()} bytes · ${portId === '__all__' ? Object.keys(portfolios).length + ' portfolio(s)' : portfolios[portId]?.name || portId}`;
+    outEl.style.display = 'block';
+  } catch(e) {
+    errEl.textContent = 'Failed to generate QR code: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+// ── QR Scanner (for iPhone importing) ──
+let qrScanInterval = null;
+
+async function startQRScan() {
+  const video      = document.getElementById('qrVideo');
+  const canvas     = document.getElementById('qrScanCanvas');
+  const statusEl   = document.getElementById('qrScanStatus');
+  const ctx        = canvas.getContext('2d');
+
+  statusEl.textContent = 'Starting camera…';
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    video.srcObject = stream;
+    video.setAttribute('playsinline', true);
+    video.style.display = 'block';
+    await video.play();
+
+    statusEl.textContent = 'Point camera at QR code…';
+
+    qrScanInterval = setInterval(() => {
+      if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+      canvas.width  = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      // Use jsQR if available, otherwise show manual paste fallback
+      if (typeof jsQR !== 'undefined') {
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
+        if (code) {
+          stopQRScan(stream, video);
+          statusEl.textContent = '✓ QR code detected!';
+          handleScannedQR(code.data);
+        }
+      } else {
+        stopQRScan(stream, video);
+        statusEl.textContent = 'Scanner unavailable — please use the Restore tab to paste the backup JSON.';
+      }
+    }, 300);
+  } catch(e) {
+    statusEl.textContent = 'Camera access denied. Please allow camera access and try again.';
+  }
+}
+
+function stopQRScan(stream, video) {
+  clearInterval(qrScanInterval);
+  stream.getTracks().forEach(t => t.stop());
+  video.style.display = 'none';
+}
+
+function handleScannedQR(data) {
+  // Pre-fill the restore textarea and switch to restore tab
+  try {
+    JSON.parse(data); // validate it's JSON
+    document.getElementById('syncRestoreTA').value = data;
+    syncTab('restore');
+    document.getElementById('qrScanStatus').textContent = '';
+    alert('QR data loaded! Choose your restore mode and tap Restore from Backup.');
+  } catch(e) {
+    document.getElementById('qrScanStatus').textContent = 'Invalid QR code — not a CryptoHodl backup.';
+  }
+}
+
 
 function exportAllPortfolios() {
   // Strip coinCache from the backup to keep file size small — prices refresh on load anyway

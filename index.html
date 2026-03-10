@@ -248,6 +248,8 @@
       .abar  { width: 36px; }
       .apct  { font-size: 0.6rem; width: 26px; }
       .cbadge { font-size: 0.6rem; padding: 2px 5px; }
+      .mob-pl-val { font-size: 0.65rem !important; }
+      .mob-pl-pct { font-size: 0.58rem !important; }
     }
 
     .coin-info { display: flex; align-items: center; gap: 11px; }
@@ -1860,8 +1862,8 @@ function renderTable() {
       const plPct  = cost > 0 ? (pl / cost) * 100 : 0;
       const plSign = pl >= 0 ? '+' : '';
       const plCls  = pl >= 0 ? 'pos' : 'neg';
-      plHtml = `<div style="font-family:var(--font-mono);font-size:0.78rem;font-weight:700" class="${plCls}">${plSign}${sym}${fmtU(Math.abs(pl))}</div>
-                <div style="font-family:var(--font-mono);font-size:0.67rem" class="${plCls}">${plSign}${plPct.toFixed(2)}%</div>`;
+      plHtml = `<div class="mob-pl-val ${plCls}" style="font-family:var(--font-mono);font-size:0.78rem;font-weight:700">${plSign}${sym}${fmtU(Math.abs(pl))}</div>
+                <div class="mob-pl-pct ${plCls}" style="font-family:var(--font-mono);font-size:0.67rem">${plSign}${plPct.toFixed(2)}%</div>`;
     }
 
     return `<tr style="cursor:pointer" onclick="openAdd(${h._i})" title="Click to edit">

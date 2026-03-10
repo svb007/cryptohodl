@@ -214,8 +214,18 @@
     td:not(:first-child) { text-align: right; }
 
     @media (max-width: 768px) {
-      .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 16px; }
-      table { min-width: 420px; }
+      .table-wrap { border-radius: 12px; }
+      table { width: 100%; }
+      thead th { padding: 10px 10px; font-size: 0.55rem; }
+      td { padding: 10px 10px; }
+      .cicon { width: 28px; height: 28px; flex-shrink: 0; }
+      .cicon img { width: 17px; height: 17px; }
+      .cname { font-size: 0.78rem; }
+      .csym  { font-size: 0.58rem; }
+      .cdesc { font-size: 0.55rem; }
+      .abar  { width: 36px; }
+      .apct  { font-size: 0.6rem; width: 26px; }
+      .cbadge { font-size: 0.6rem; padding: 2px 5px; }
     }
 
     .coin-info { display: flex; align-items: center; gap: 11px; }
@@ -226,7 +236,7 @@
     .cicon img { width: 22px; height: 22px; object-fit: contain; }
     .cname { font-weight: 700; font-size: 0.92rem; }
     .csym  { font-family: var(--font-mono); font-size: 0.67rem; color: var(--muted); margin-top: 2px; }
-    .cdesc { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); margin-top: 2px; max-width: 155px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cdesc { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); margin-top: 2px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     .price-val { font-family: var(--font-mono); font-size: 0.87rem; font-weight: 700; }
     .cbadge {

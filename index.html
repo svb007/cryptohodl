@@ -41,6 +41,7 @@
   </script>
   <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -1538,22 +1539,29 @@ function generateQR() {
     return;
   }
 
-  // Clear previous QR
-  wrap.innerHTML = '<div id="qrInner"></div>';
+  // Use QRious — canvas-based, no DOM injection issues
+  wrap.innerHTML = '<canvas id="qrCanvas"></canvas>';
+  const canvas = document.getElementById('qrCanvas');
 
   try {
-    new QRCode(document.getElementById('qrInner'), {
-      text:           payload,
-      width:          260,
-      height:         260,
-      colorDark:      '#000000',
-      colorLight:     '#ffffff',
-      correctLevel:   QRCode.CorrectLevel.M,
+    const qr = new QRious({
+      element:         canvas,
+      value:           payload,
+      size:            260,
+      foreground:      '#000000',
+      background:      '#ffffff',
+      level:           'M',   // medium error correction — good balance of size vs reliability
     });
-    metaEl.textContent = `${bytes.toLocaleString()} bytes · ${portId === '__all__' ? Object.keys(portfolios).length + ' portfolio(s)' : portfolios[portId]?.name || portId}`;
+    metaEl.textContent = `${bytes.toLocaleString()} bytes · ${portId === '__all__'
+      ? Object.keys(portfolios).length + ' portfolio(s)'
+      : portfolios[portId]?.name || portId}`;
     outEl.style.display = 'block';
   } catch(e) {
-    errEl.textContent = 'Failed to generate QR code: ' + e.message;
+    // If QRious also fails it means the data genuinely exceeds QR capacity
+    errEl.innerHTML =
+      `⚠️ Could not generate QR code for this portfolio (${bytes.toLocaleString()} bytes).<br><br>` +
+      `The data is too complex even for a max-capacity QR code. Please use ` +
+      `<b>Download Backup File</b> and transfer via AirDrop or iCloud instead.`;
     errEl.style.display = 'block';
   }
 }

@@ -83,7 +83,29 @@
 
     @media (max-width: 768px), (pointer: coarse) {
       .nav-actions { display: none !important; }
+      .logo:not(.mob-logo) { display: none; }
+
+      nav { align-items: center; padding: 8px 14px; }
+
       .mob-nav {
+        display: flex; align-items: center; justify-content: space-between; width: 100%;
+      }
+      .mob-nav-left {
+        display: flex; flex-direction: column; gap: 4px;
+      }
+      .mob-logo {
+        font-size: 1.1rem; letter-spacing: -0.3px;
+      }
+      .mob-port-wrap {
+        background: transparent !important; border: none !important; padding: 0 !important;
+      }
+      .mob-port-wrap .port-select {
+        font-size: 0.75rem; color: var(--muted); font-weight: 600; min-width: 60px; max-width: 160px;
+      }
+      .mob-port-wrap .port-manage-btn {
+        width: 22px; height: 22px; font-size: 0.7rem;
+      }
+      .mob-nav-right {
         display: flex; align-items: center; gap: 8px;
       }
       .mob-menu-btn {
@@ -431,12 +453,17 @@
 
   <!-- Mobile-only controls (always visible) -->
   <div class="mob-nav">
-    <div class="port-wrap" title="Switch portfolio">
-      <select class="port-select" id="portSelectMob" onchange="switchPortfolioMob()"></select>
-      <button class="port-manage-btn" onclick="openManagePortfolios()" title="Manage portfolios">⚙</button>
+    <div class="mob-nav-left">
+      <div class="logo mob-logo">Crypto<span>Hodl</span></div>
+      <div class="port-wrap mob-port-wrap" title="Switch portfolio">
+        <select class="port-select" id="portSelectMob" onchange="switchPortfolioMob()"></select>
+        <button class="port-manage-btn" onclick="openManagePortfolios()" title="Manage portfolios">⚙</button>
+      </div>
     </div>
-    <button class="btn-primary" style="padding:8px 14px;font-size:0.82rem" onclick="openAdd()">+ Add</button>
-    <button class="mob-menu-btn" id="mobMenuBtn" onclick="toggleMobMenu()" title="Menu">☰</button>
+    <div class="mob-nav-right">
+      <button class="btn-primary" style="padding:8px 14px;font-size:0.82rem" onclick="openAdd()">+ Add</button>
+      <button class="mob-menu-btn" id="mobMenuBtn" onclick="toggleMobMenu()" title="Menu">☰</button>
+    </div>
   </div>
 </nav>
 
@@ -1843,7 +1870,7 @@ function renderTable() {
           ${icoHtml(c, 36)}
           <div>
             <div class="cname">${esc(c.name || h.uuid)}</div>
-            <div class="csym">${esc(c.symbol || '')}${c.price ? ' · ' + sym + fmtP(c.price) : ''}</div>
+            <div class="csym">${c.price ? sym + fmtP(c.price) : ''}</div>
             <div class="cdesc">${fmtA(h.amount)} ${esc(c.symbol||'')}</div>
           </div>
         </div>

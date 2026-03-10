@@ -1,0 +1,1603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CryptoHodl — Portfolio Tracker</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%23f0b429'/%3E%3Cstop offset='100%25' stop-color='%23d4890a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='%230a0c10'/%3E%3Cpolygon points='16,3 29,11 29,21 16,29 3,21 3,11' fill='url(%23g)'/%3E%3Cpolygon points='16,7 25,12 25,20 16,25 7,20 7,12' fill='%230a0c10'/%3E%3Cpolygon points='16,11 21,14 21,18 16,21 11,18 11,14' fill='url(%23g)'/%3E%3C/svg%3E"/>
+  <meta name="theme-color" content="#0a0c10"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="CryptoHodl"/>
+  <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22CryptoHodl%22%2C%22short_name%22%3A%22CryptoHodl%22%2C%22description%22%3A%22Crypto%20portfolio%20tracker%22%2C%22start_url%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230a0c10%22%2C%22theme_color%22%3A%22%23f0b429%22%2C%22orientation%22%3A%22portrait-primary%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%2520viewBox%3D'0%25200%252032%252032'%253E%253Crect%2520width%3D'32'%2520height%3D'32'%2520rx%3D'8'%2520fill%3D'%25230a0c10'%2F%253E%253Cpolygon%2520points%3D'16%2C3%252029%2C11%252029%2C21%252016%2C29%25203%2C21%25203%2C11'%2520fill%3D'%2523f0b429'%2F%253E%253Cpolygon%2520points%3D'16%2C7%252025%2C12%252025%2C20%252016%2C25%25207%2C20%25207%2C12'%2520fill%3D'%25230a0c10'%2F%253E%253Cpolygon%2520points%3D'16%2C11%252021%2C14%252021%2C18%252016%2C21%252011%2C18%252011%2C14'%2520fill%3D'%2523f0b429'%2F%253E%253C%2Fsvg%253E%22%2C%22sizes%22%3A%22any%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D"/>
+  <script>
+    // Register a minimal service worker for PWA installability
+    if ('serviceWorker' in navigator) {
+      const sw = `
+        const CACHE = 'cryptohodl-v1';
+        self.addEventListener('install', e => self.skipWaiting());
+        self.addEventListener('activate', e => self.clients.claim());
+        self.addEventListener('fetch', e => {
+          // Network-first for API calls, cache-first for the app shell
+          if (e.request.url.includes('coinranking.com') || e.request.url.includes('googleapis.com')) {
+            e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+          } else {
+            e.respondWith(
+              caches.open(CACHE).then(cache =>
+                cache.match(e.request).then(cached => {
+                  const fresh = fetch(e.request).then(r => { cache.put(e.request, r.clone()); return r; });
+                  return cached || fresh;
+                })
+              )
+            );
+          }
+        });
+      `;
+      const blob = new Blob([sw], { type: 'application/javascript' });
+      const swUrl = URL.createObjectURL(blob);
+      navigator.serviceWorker.register(swUrl, { scope: './' }).catch(() => {});
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0c10; --surface: #111318; --surface2: #181c24;
+      --border: #232836; --accent: #f0b429; --red: #ff4d6a; --green: #00d4aa;
+      --text: #e8eaf0; --muted: #6b7280;
+      --font-display: 'Syne', sans-serif; --font-mono: 'Space Mono', monospace;
+    }
+    body { background: var(--bg); color: var(--text); font-family: var(--font-display); min-height: 100vh; overflow-x: hidden; }
+    body::before {
+      content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 10% 0%, rgba(240,180,41,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 90% 100%, rgba(0,212,170,0.05) 0%, transparent 60%);
+    }
+
+    /* NAV */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 28px;
+      background: rgba(10,12,16,0.88); backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      gap: 12px;
+    }
+    .logo { font-weight: 800; font-size: 1.25rem; letter-spacing: -0.5px; flex-shrink: 0; }
+    .logo span { color: var(--accent); }
+    .nav-actions { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .nav-actions::-webkit-scrollbar { display: none; }
+
+    @media (max-width: 768px) {
+      nav { padding: 10px 14px; }
+    }
+
+    .api-badge {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--font-mono); font-size: 0.68rem;
+      padding: 6px 10px; border-radius: 7px;
+      border: 1px solid var(--border); color: var(--muted);
+      cursor: pointer; transition: all 0.2s; background: transparent;
+    }
+    .api-badge:hover { border-color: var(--muted); color: var(--text); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); flex-shrink: 0; }
+    .dot.on { background: var(--green); }
+
+    button { font-family: var(--font-display); cursor: pointer; border: none; outline: none; }
+    .btn-primary {
+      background: var(--accent); color: #000; font-weight: 700; font-size: 0.85rem;
+      padding: 9px 20px; border-radius: 8px; transition: all 0.2s; letter-spacing: 0.3px;
+    }
+    .btn-primary:hover { background: #f5c842; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(240,180,41,0.3); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+    .btn-ghost {
+      background: transparent; color: var(--muted); font-weight: 600; font-size: 0.85rem;
+      padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); transition: all 0.2s;
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+    /* TICKER */
+    .ticker-wrap {
+      overflow: hidden; border-bottom: 1px solid var(--border);
+      background: var(--surface); padding: 9px 0; position: relative; z-index: 1;
+    }
+    .ticker { display: flex; animation: tickerScroll 40s linear infinite; white-space: nowrap; }
+    .ticker:hover { animation-play-state: paused; }
+    @keyframes tickerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+    .ticker-item {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 0 22px; font-family: var(--font-mono); font-size: 0.72rem;
+      border-right: 1px solid var(--border);
+    }
+    .ticker-sym { font-weight: 700; }
+    .ticker-icon { width: 15px; height: 15px; border-radius: 50%; object-fit: contain; }
+
+    /* MAIN */
+    main { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 44px 24px 80px; }
+    @media (max-width: 900px) and (pointer: coarse) { main { padding: 16px 12px 60px; } }
+
+    /* SUMMARY */
+    .summary-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 40px;
+    }
+    .summary-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
+      padding: 32px 32px 28px; transition: border-color 0.2s; display: flex; flex-direction: column; gap: 8px;
+    }
+    .summary-card:hover { border-color: rgba(240,180,41,0.3); }
+    .slabel {
+      font-family: var(--font-mono); font-size: 0.63rem; color: var(--muted);
+      letter-spacing: 2px; text-transform: uppercase;
+    }
+    .svalue {
+      font-family: var(--font-display); font-size: 2.4rem; font-weight: 800;
+      letter-spacing: -2px; line-height: 1.05; color: var(--text);
+    }
+    .ssub { font-family: var(--font-mono); font-size: 0.75rem; margin-top: 4px; }
+    .pos { color: var(--green); } .neg { color: var(--red); }
+
+    @media (max-width: 900px) and (pointer: coarse) {
+      .summary-grid { grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px; }
+      .summary-card { padding: 12px 14px 10px; border-radius: 12px; gap: 3px; }
+      .slabel { font-size: 0.52rem; letter-spacing: 1px; }
+      .svalue { font-size: 1.1rem; letter-spacing: -0.5px; line-height: 1.1; }
+      .ssub   { font-size: 0.62rem; margin-top: 1px; }
+    }
+
+    /* TABLE */
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .section-title { font-size: 1rem; font-weight: 700; }
+    .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 1.5px; text-transform: uppercase;
+      color: var(--muted); padding: 12px 18px; text-align: left; border-bottom: 1px solid var(--border);
+    }
+    thead th:not(:first-child) { text-align: right; }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background 0.13s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--surface2); }
+    td { padding: 13px 18px; vertical-align: middle; }
+    td:not(:first-child) { text-align: right; }
+
+    @media (max-width: 768px) {
+      .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 16px; }
+      table { min-width: 780px; }
+    }
+
+    .coin-info { display: flex; align-items: center; gap: 11px; }
+    .cicon {
+      width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+    }
+    .cicon img { width: 22px; height: 22px; object-fit: contain; }
+    .cname { font-weight: 700; font-size: 0.92rem; }
+    .csym  { font-family: var(--font-mono); font-size: 0.67rem; color: var(--muted); margin-top: 2px; }
+    .cdesc { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); margin-top: 2px; max-width: 155px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .price-val { font-family: var(--font-mono); font-size: 0.87rem; font-weight: 700; }
+    .cbadge {
+      display: inline-block; font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700;
+      padding: 3px 8px; border-radius: 6px;
+    }
+    .cbadge.pos { background: rgba(0,212,170,0.12); }
+    .cbadge.neg { background: rgba(255,77,106,0.12); }
+
+    .abar-wrap { display: flex; align-items: center; gap: 7px; justify-content: flex-end; }
+    .abar { width: 54px; height: 4px; border-radius: 99px; background: var(--border); overflow: hidden; }
+    .abar-fill { height: 100%; border-radius: 99px; background: var(--accent); }
+    .apct { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); width: 34px; text-align: right; }
+
+    .row-actions { display: flex; gap: 5px; justify-content: flex-end; }
+    .icon-btn {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+      width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center;
+      justify-content: center; font-size: 0.77rem; cursor: pointer; transition: all 0.14s;
+    }
+    .icon-btn:hover { color: var(--text); border-color: var(--muted); }
+    .icon-btn.del:hover { color: var(--red); border-color: var(--red); background: rgba(255,77,106,0.08); }
+
+    /* EMPTY */
+    .empty-state { text-align: center; padding: 56px 24px; color: var(--muted); }
+    .empty-state .big { font-size: 2.8rem; margin-bottom: 12px; }
+    .empty-state p { font-size: 0.87rem; line-height: 1.7; }
+
+    /* MODAL */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; z-index: 200;
+      background: rgba(0,0,0,0.72); backdrop-filter: blur(6px);
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; animation: mfade 0.17s; }
+    @keyframes mfade { from { opacity:0; } to { opacity:1; } }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
+      padding: 28px; width: 100%; max-width: 420px; margin: 20px;
+      animation: mslide 0.2s ease;
+    }
+    @keyframes mslide { from { transform: translateY(16px); opacity:0; } to { transform: translateY(0); opacity:1; } }
+    .modal h2 { font-size: 1.12rem; font-weight: 800; margin-bottom: 20px; }
+
+    .fg { margin-bottom: 14px; }
+    .fg label {
+      display: block; font-family: var(--font-mono); font-size: 0.65rem;
+      letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
+    }
+    .fg input, .fg select, .fg textarea {
+      width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 12px; color: var(--text); font-family: var(--font-mono); font-size: 0.86rem;
+      outline: none; transition: border-color 0.2s;
+    }
+    .fg input:focus, .fg select:focus, .fg textarea:focus { border-color: var(--accent); }
+    .fg select option { background: var(--surface); }
+    .fg textarea { resize: vertical; line-height: 1.55; }
+
+    .mactions { display: flex; gap: 9px; margin-top: 20px; }
+    .mactions button { flex: 1; padding: 11px; border-radius: 10px; font-size: 0.87rem; font-weight: 700; }
+
+    /* SEARCH RESULTS DROPDOWN */
+    .search-results {
+      margin-top: 6px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden; max-height: 200px; overflow-y: auto;
+    }
+    .search-result-item {
+      display: flex; align-items: center; gap: 10px; padding: 9px 13px;
+      cursor: pointer; transition: background 0.1s; border-bottom: 1px solid var(--border);
+    }
+    .search-result-item:last-child { border-bottom: none; }
+    .search-result-item:hover { background: var(--surface2); }
+
+    /* SELECTED COIN PREVIEW */
+    .coin-preview {
+      display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+      margin-bottom: 14px;
+    }
+
+    /* IMPORT LOG */
+    .ilog {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 12px; max-height: 148px; overflow-y: auto;
+      font-family: var(--font-mono); font-size: 0.69rem; line-height: 1.85;
+    }
+    .prow { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
+    .ptrack { flex: 1; height: 5px; border-radius: 99px; background: var(--border); overflow: hidden; }
+    .pfill  { height: 100%; border-radius: 99px; background: var(--accent); width: 0%; transition: width 0.3s; }
+    .plabel { font-family: var(--font-mono); font-size: 0.67rem; color: var(--muted); white-space: nowrap; }
+
+    /* SETTINGS */
+    .sinfo { font-size: 0.79rem; color: var(--muted); line-height: 1.65; margin-bottom: 16px; }
+    .sinfo a { color: var(--accent); text-decoration: none; }
+    .sinfo a:hover { text-decoration: underline; }
+    .kpreview {
+      font-family: var(--font-mono); font-size: 0.76rem; padding: 8px 11px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--muted); margin-top: 6px; word-break: break-all;
+    }
+
+    /* PORTFOLIO SWITCHER */
+    .port-wrap {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 4px 4px 4px 10px;
+    }
+    .port-select {
+      appearance: none; -webkit-appearance: none;
+      background: transparent; border: none;
+      color: var(--text); font-family: var(--font-display); font-size: 0.85rem; font-weight: 700;
+      cursor: pointer; outline: none; min-width: 80px; max-width: 160px;
+      padding-right: 4px;
+    }
+    .port-select option { background: var(--surface); font-weight: 400; }
+    .port-manage-btn {
+      background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+      width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center;
+      justify-content: center; font-size: 0.8rem; cursor: pointer; transition: all 0.14s; flex-shrink: 0;
+    }
+    .port-manage-btn:hover { color: var(--text); border-color: var(--muted); }
+
+    /* CURRENCY SELECTOR */
+    .cur-select-wrap {
+      position: relative; display: flex; align-items: center;
+    }
+    .cur-select {
+      appearance: none; -webkit-appearance: none;
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700;
+      padding: 7px 28px 7px 10px; border-radius: 8px; cursor: pointer;
+      outline: none; transition: border-color 0.2s; min-width: 90px;
+    }
+    .cur-select:hover  { border-color: var(--muted); }
+    .cur-select:focus  { border-color: var(--accent); }
+    .cur-select option { background: var(--surface); }
+    .cur-chevron {
+      position: absolute; right: 8px; pointer-events: none;
+      font-size: 0.6rem; color: var(--muted);
+    }
+    .cur-loading { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); padding: 0 4px; }
+
+    footer {
+      text-align: center; padding: 20px; font-family: var(--font-mono); font-size: 0.67rem;
+      color: var(--muted); border-top: 1px solid var(--border); position: relative; z-index: 1;
+    }
+  </style>
+</head>
+<body>
+
+<!-- TICKER -->
+<div class="ticker-wrap">
+  <div class="ticker" id="ticker">
+    <span class="ticker-item" style="color:var(--muted)">Waiting for prices…</span>
+  </div>
+</div>
+
+<!-- NAV -->
+<nav>
+  <div class="logo">Crypto<span>Hodl</span></div>
+  <div class="nav-actions">
+    <button class="api-badge" onclick="openSettings()">
+      <div class="dot" id="apiDot"></div>
+      <span id="apiLabel">No API key</span>
+    </button>
+    <!-- Portfolio switcher -->
+    <div class="port-wrap" title="Switch portfolio">
+      <select class="port-select" id="portSelect" onchange="switchPortfolio()"></select>
+      <button class="port-manage-btn" onclick="openManagePortfolios()" title="Manage portfolios">⚙</button>
+    </div>
+    <button class="btn-ghost" onclick="exportCSV()">⬇ CSV</button>
+    <button class="btn-ghost" onclick="exportJSON()">⬇ JSON</button>
+    <button class="btn-ghost" onclick="openImport()">⬆ Import JSON</button>
+    <button class="btn-ghost" onclick="openSync()" title="Backup & restore all portfolios">⇅ Sync</button>
+    <div class="cur-select-wrap" title="Display currency">
+      <select class="cur-select" id="curSelect" onchange="onCurrencyChange()">
+        <option value="yhjMzLPhuIDl" data-symbol="$" data-code="USD">USD</option>
+      </select>
+      <span class="cur-chevron">▾</span>
+    </div>
+    <button class="btn-primary" onclick="openAdd()">+ Add Coin</button>
+  </div>
+</nav>
+
+<!-- MAIN -->
+<main>
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="slabel">Portfolio Value</div>
+      <div class="svalue" id="sTotal">$0.00</div>
+      <div class="ssub"  id="sPnl">—</div>
+    </div>
+    <div class="summary-card">
+      <div class="slabel">Total Spent</div>
+      <div class="svalue" id="sInvested">$0.00</div>
+      <div class="ssub" style="color:var(--muted)">cost basis</div>
+    </div>
+    <div class="summary-card">
+      <div class="slabel">24h Change</div>
+      <div class="svalue" id="sDay">—</div>
+      <div class="ssub"   id="sDayPct">—</div>
+    </div>
+  </div>
+
+  <div class="section-header">
+    <div class="section-title">Holdings</div>
+    <div style="font-family:var(--font-mono);font-size:0.71rem;color:var(--muted)" id="lastUp"></div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Asset</th><th>Price</th><th>24h</th>
+        <th>Holdings</th><th>Value</th><th>P&amp;L</th><th>Alloc</th><th></th>
+      </tr></thead>
+      <tbody id="tBody"></tbody>
+    </table>
+    <div id="emptyState" class="empty-state">
+      <div class="big">🪙</div>
+      <p>No holdings yet.<br>Add a coin manually or use <b>Import JSON</b> with your Coinranking data.</p>
+    </div>
+  </div>
+</main>
+
+<footer>CryptoHodl &nbsp;·&nbsp; Powered by Coinranking API &nbsp;·&nbsp; Auto-refreshes every 60s</footer>
+
+<!-- ══════════════════════════════════════════
+     SETTINGS MODAL
+══════════════════════════════════════════ -->
+<div class="modal-overlay" id="mSettings" onclick="bgClose(event,'mSettings')">
+  <div class="modal" style="max-width:460px">
+    <h2>⚙ Coinranking API Key</h2>
+    <div class="sinfo">
+      An API key is required to fetch live prices and resolve coin UUIDs on import.
+      Get yours free at <a href="https://coinranking.com/page/key" target="_blank">coinranking.com/page/key</a>.<br><br>
+      Your key is stored only in your browser's <code>localStorage</code> and never sent anywhere except Coinranking's API.
+    </div>
+    <div class="fg">
+      <label>API Key</label>
+      <input type="text" id="apiKeyIn" placeholder="coinranking live_xxxxxxxx…" autocomplete="off"/>
+    </div>
+    <div class="kpreview" id="kPreview">No key saved</div>
+    <div class="mactions">
+      <button class="btn-ghost" onclick="closeM('mSettings')">Cancel</button>
+      <button class="btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="clearKey()">Clear</button>
+      <button class="btn-primary" onclick="saveKey()">Save & Connect</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     ADD / EDIT HOLDING MODAL
+══════════════════════════════════════════ -->
+<div class="modal-overlay" id="mHolding" onclick="bgClose(event,'mHolding')">
+  <div class="modal">
+    <h2 id="mHoldingTitle">Add Holding</h2>
+
+    <div class="fg">
+      <label>Search Coin</label>
+      <input type="text" id="coinSearchIn" placeholder="Type name or symbol…" oninput="debSearch()" autocomplete="off"/>
+      <div id="searchDrop" class="search-results" style="display:none"></div>
+    </div>
+
+    <div id="coinPreview" class="coin-preview" style="display:none">
+      <div id="previewIco"></div>
+      <div>
+        <div id="previewNm" style="font-weight:700;font-size:0.9rem"></div>
+        <div id="previewSy" style="font-family:var(--font-mono);font-size:0.67rem;color:var(--muted)"></div>
+      </div>
+    </div>
+
+    <div class="fg">
+      <label>Amount (quantity)</label>
+      <input type="number" id="amtIn" placeholder="e.g. 0.5" min="0" step="any"/>
+    </div>
+    <div class="fg">
+      <label id="bpLabel">Total Spent (optional)</label>
+      <input type="number" id="bpIn" placeholder="e.g. 1500.00" min="0" step="any"/>
+    </div>
+    <div class="fg">
+      <label>Description (optional)</label>
+      <textarea id="descIn" placeholder="e.g. Ledger wallet, Exchange 1…" autocomplete="off" rows="3" style="resize:vertical"></textarea>
+    </div>
+    <div class="mactions">
+      <button class="btn-ghost" onclick="closeM('mHolding')">Cancel</button>
+      <button class="btn-primary" onclick="saveHolding()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     IMPORT MODAL
+══════════════════════════════════════════ -->
+<div class="modal-overlay" id="mImport" onclick="bgClose(event,'mImport')">
+  <div class="modal" style="max-width:540px">
+    <h2>⬆ Import Holdings · JSON</h2>
+    <p style="font-size:0.79rem;color:var(--muted);margin:-8px 0 16px;line-height:1.65">
+      Paste an array with <code style="color:var(--accent)">coinrankingUuid</code>,
+      <code style="color:var(--accent)">amount</code>, and optional
+      <code style="color:var(--accent)">description</code>.
+      Each UUID is resolved live via Coinranking — requires your API key.
+    </p>
+    <div class="fg">
+      <label>JSON Data</label>
+      <textarea id="importTA" rows="7" placeholder='[
+  {
+    "id": 1,
+    "coinrankingUuid": "Qwsogvtv82FCd",
+    "amount": 0.5,
+    "buyPrice": 30000.00,
+    "description": "My BTC"
+  },
+  ...
+]'></textarea>
+    </div>
+    <div class="fg">
+      <label>Import Mode</label>
+      <select id="importMode">
+        <option value="merge">Merge — add to existing holdings</option>
+        <option value="replace">Replace — clear portfolio first</option>
+      </select>
+    </div>
+    <div id="importProg" style="display:none;margin-top:6px">
+      <div class="ilog" id="ilog"></div>
+      <div class="prow">
+        <div class="ptrack"><div class="pfill" id="pBar"></div></div>
+        <span class="plabel" id="pLabel">0 / 0</span>
+      </div>
+    </div>
+    <div class="mactions" style="margin-top:18px">
+      <button class="btn-ghost"   id="importCancelBtn" onclick="closeM('mImport')">Cancel</button>
+      <button class="btn-primary" id="importRunBtn"    onclick="runImport()">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     SYNC MODAL
+══════════════════════════════════════════ -->
+<div class="modal-overlay" id="mSync" onclick="bgClose(event,'mSync')">
+  <div class="modal" style="max-width:520px">
+    <h2>⇅ Backup & Restore All Portfolios</h2>
+    <p style="font-size:0.79rem;color:var(--muted);margin:-8px 0 18px;line-height:1.7">
+      Export a single backup file containing <b>all</b> your portfolios (holdings, descriptions, buy prices, and currency preferences).
+      Copy it to another device and restore it there to sync everything at once.
+    </p>
+
+    <!-- Backup -->
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px">
+      <div style="font-weight:700;font-size:0.88rem;margin-bottom:6px">📤 Backup</div>
+      <div style="font-size:0.79rem;color:var(--muted);margin-bottom:12px">
+        Downloads a <code style="color:var(--accent)">.json</code> file with all portfolios. Keep it somewhere safe.
+      </div>
+      <button class="btn-primary" style="width:100%" onclick="exportAllPortfolios()">Download Backup File</button>
+    </div>
+
+    <!-- Restore -->
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px">
+      <div style="font-weight:700;font-size:0.88rem;margin-bottom:6px">📥 Restore</div>
+      <div style="font-size:0.79rem;color:var(--muted);margin-bottom:12px">
+        Paste the contents of your backup file below, then choose how to restore.
+      </div>
+      <div class="fg">
+        <label>Backup JSON</label>
+        <textarea id="syncRestoreTA" rows="5" placeholder='{"portfolios": {...}, "activePortId": "..."}' style="font-family:var(--font-mono);font-size:0.75rem;resize:vertical"></textarea>
+      </div>
+      <div class="fg">
+        <label>Restore Mode</label>
+        <select id="syncRestoreMode">
+          <option value="merge">Merge — keep existing portfolios, add any new ones from backup</option>
+          <option value="replace">Replace — overwrite everything with the backup</option>
+        </select>
+      </div>
+      <button class="btn-primary" style="width:100%;background:var(--green);border-color:var(--green);color:#000" onclick="restoreAllPortfolios()">Restore from Backup</button>
+    </div>
+
+    <div class="mactions" style="margin-top:16px">
+      <button class="btn-ghost" onclick="closeM('mSync')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     MANAGE PORTFOLIOS MODAL
+══════════════════════════════════════════ -->
+<div class="modal-overlay" id="mPortfolios" onclick="bgClose(event,'mPortfolios')">
+  <div class="modal" style="max-width:460px">
+    <h2>📁 Manage Portfolios</h2>
+
+    <!-- Portfolio list -->
+    <div id="portList" style="margin-bottom:16px;display:flex;flex-direction:column;gap:6px"></div>
+
+    <!-- Create new -->
+    <div style="border-top:1px solid var(--border);padding-top:16px">
+      <div class="fg" style="margin-bottom:0">
+        <label>New Portfolio Name</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="newPortName" placeholder="e.g. Hardware Wallet, Exchange…"
+            autocomplete="off" style="flex:1"
+            onkeydown="if(event.key==='Enter') createPortfolio()"/>
+          <button class="btn-primary" style="flex-shrink:0;padding:10px 16px" onclick="createPortfolio()">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="mactions" style="margin-top:16px">
+      <button class="btn-ghost" onclick="closeM('mPortfolios')">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════════
+//  STORAGE KEYS
+// ════════════════════════════════════════════════════════════════════
+const AKK       = 'ch_apikey';
+const PORTS_KEY = 'ch_portfolios_v1';   // { id: { name, holdings, coinCache, currency } }
+const ACTIVE_KEY= 'ch_active_port_v1';  // id of active portfolio
+
+// ── Portfolio helpers ────────────────────────────────────────────────
+function loadPortfolios() {
+  return JSON.parse(localStorage.getItem(PORTS_KEY) || 'null') || {
+    'default': {
+      name:      'My Portfolio',
+      holdings:  JSON.parse(localStorage.getItem('ch_holdings_v4') || '[]'),
+      coinCache: JSON.parse(localStorage.getItem('ch_coincache_v4') || '{}'),
+      currency:  JSON.parse(localStorage.getItem('ch_currency_v4')  || 'null')
+                 || { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' },
+    }
+  };
+}
+
+function savePortfolios() {
+  localStorage.setItem(PORTS_KEY, JSON.stringify(portfolios));
+}
+
+function persistActive() {
+  portfolios[activePortId].holdings  = holdings;
+  portfolios[activePortId].coinCache = coinCache;
+  portfolios[activePortId].currency  = activeCurrency;
+  savePortfolios();
+}
+
+// ── State ────────────────────────────────────────────────────────────
+let portfolios    = loadPortfolios();
+let activePortId  = localStorage.getItem(ACTIVE_KEY) || Object.keys(portfolios)[0];
+
+// Guard: ensure activePortId actually exists
+if (!portfolios[activePortId]) activePortId = Object.keys(portfolios)[0];
+
+let holdings       = portfolios[activePortId].holdings  || [];
+let coinCache      = portfolios[activePortId].coinCache || {};
+let activeCurrency = portfolios[activePortId].currency  ||
+                     { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' };
+let apiKey         = localStorage.getItem(AKK) || '';
+
+let editIdx     = null;
+let activeCoin  = null;
+let searchTimer = null;
+
+// ════════════════════════════════════════════════════════════════════
+//  PORTFOLIO MANAGEMENT
+// ════════════════════════════════════════════════════════════════════
+function renderPortSelect() {
+  const sel = document.getElementById('portSelect');
+  sel.innerHTML = Object.entries(portfolios).map(([id, p]) =>
+    `<option value="${esc(id)}" ${id === activePortId ? 'selected' : ''}>${esc(p.name)}</option>`
+  ).join('');
+}
+
+function switchPortfolio() {
+  const newId = document.getElementById('portSelect').value;
+  if (newId === activePortId) return;
+
+  // Save current state back before switching
+  persistActive();
+
+  activePortId   = newId;
+  localStorage.setItem(ACTIVE_KEY, activePortId);
+
+  holdings       = portfolios[activePortId].holdings  || [];
+  coinCache      = portfolios[activePortId].coinCache || {};
+  activeCurrency = portfolios[activePortId].currency  ||
+                   { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' };
+
+  // Correct any stale placeholder UUIDs
+  if (UUID_CORRECTIONS[activeCurrency.uuid]) {
+    activeCurrency.uuid = UUID_CORRECTIONS[activeCurrency.uuid];
+  }
+
+  // Update currency selector to reflect this portfolio's saved currency
+  syncCurrencySelect();
+  renderAll();
+  if (apiKey) refreshPrices();
+}
+
+function syncCurrencySelect() {
+  const sel = document.getElementById('curSelect');
+  // Try to select by uuid first, then by code
+  let matched = false;
+  for (const opt of sel.options) {
+    if (opt.value === activeCurrency.uuid || opt.dataset.code === activeCurrency.code) {
+      opt.selected = true;
+      // Sync activeCurrency symbol from the option
+      activeCurrency.symbol = opt.dataset.symbol || activeCurrency.symbol;
+      matched = true;
+      break;
+    }
+  }
+  if (!matched && sel.options.length > 0) sel.options[0].selected = true;
+}
+
+function openManagePortfolios() {
+  renderPortList();
+  openM('mPortfolios');
+}
+
+function renderPortList() {
+  const el = document.getElementById('portList');
+  el.innerHTML = Object.entries(portfolios).map(([id, p]) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+                background:var(--bg);border:1px solid ${id===activePortId?'var(--accent)':'var(--border)'};
+                border-radius:10px">
+      <div style="flex:1;font-weight:${id===activePortId?'700':'400'};font-size:0.88rem">
+        ${esc(p.name)}
+        ${id===activePortId ? '<span style="font-family:var(--font-mono);font-size:0.65rem;color:var(--accent);margin-left:6px">ACTIVE</span>' : ''}
+      </div>
+      <span style="font-family:var(--font-mono);font-size:0.68rem;color:var(--muted)">${p.holdings?.length||0} holdings</span>
+      <button class="icon-btn" onclick="renamePortfolio('${esc(id)}')" title="Rename">✎</button>
+      ${Object.keys(portfolios).length > 1
+        ? `<button class="icon-btn del" onclick="deletePortfolio('${esc(id)}')" title="Delete">✕</button>`
+        : '<div style="width:28px"></div>'}
+    </div>
+  `).join('');
+}
+
+function createPortfolio() {
+  const name = document.getElementById('newPortName').value.trim();
+  if (!name) { alert('Please enter a name.'); return; }
+  const id = 'port_' + Date.now();
+  portfolios[id] = {
+    name,
+    holdings:  [],
+    coinCache: {},
+    currency:  { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' },
+  };
+  savePortfolios();
+  document.getElementById('newPortName').value = '';
+  renderPortSelect();
+  renderPortList();
+}
+
+function renamePortfolio(id) {
+  const current = portfolios[id]?.name || '';
+  const name = prompt('Rename portfolio:', current);
+  if (!name || !name.trim()) return;
+  portfolios[id].name = name.trim();
+  savePortfolios();
+  renderPortSelect();
+  renderPortList();
+}
+
+function deletePortfolio(id) {
+  if (Object.keys(portfolios).length <= 1) { alert('Cannot delete the last portfolio.'); return; }
+  if (!confirm(`Delete "${portfolios[id].name}"? This cannot be undone.`)) return;
+  delete portfolios[id];
+  savePortfolios();
+  // If we deleted the active one, switch to first available
+  if (activePortId === id) {
+    activePortId = Object.keys(portfolios)[0];
+    localStorage.setItem(ACTIVE_KEY, activePortId);
+    holdings       = portfolios[activePortId].holdings  || [];
+    coinCache      = portfolios[activePortId].coinCache || {};
+    activeCurrency = portfolios[activePortId].currency  ||
+                     { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' };
+    syncCurrencySelect();
+    renderAll();
+    if (apiKey) refreshPrices();
+  }
+  renderPortSelect();
+  renderPortList();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  COINRANKING API
+// ════════════════════════════════════════════════════════════════════
+function crHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (apiKey) h['x-access-token'] = apiKey;
+  return h;
+}
+
+async function crGet(path) {
+  const r = await fetch('https://api.coinranking.com/v2' + path, { headers: crHeaders() });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  if (j.status !== 'success') throw new Error(j.message || 'API error');
+  return j.data;
+}
+
+// Correct any stale placeholder UUIDs in activeCurrency
+const UUID_CORRECTIONS = {
+  '__USD__': 'yhjMzLPhuIDl',
+  '__NZD__': 'jlhBX5IMqZzc',
+  '__ZAR__': '5IPIPRCm3C6O',
+};
+if (UUID_CORRECTIONS[activeCurrency.uuid]) {
+  activeCurrency.uuid = UUID_CORRECTIONS[activeCurrency.uuid];
+  portfolios[activePortId].currency = activeCurrency;
+  savePortfolios();
+}
+
+// Safe currency UUID — never send a placeholder to the API
+function curUuid() {
+  const uuid = activeCurrency.uuid;
+  return (uuid && !uuid.startsWith('__')) ? uuid : 'yhjMzLPhuIDl';
+}
+
+// Fetch one coin by UUID — guaranteed to return that specific coin
+async function fetchByUuid(uuid) {
+  const d = await crGet('/coin/' + uuid + '?referenceCurrencyUuid=' + curUuid());
+  return normCoin(d.coin);
+}
+
+// Fetch multiple coins in ONE call.
+// Mirrors the working Python: requests.get(url, params={uuids: [...], ...})
+// which produces uuids=val1&uuids=val2 — NO brackets, NO encoding of the key.
+async function fetchBatch(uuids) {
+  if (!uuids.length) return {};
+  const parts = uuids.map(u => 'uuids=' + encodeURIComponent(u));
+  parts.push('referenceCurrencyUuid=' + curUuid());
+  parts.push('limit=' + uuids.length);
+  const d = await crGet('/coins?' + parts.join('&'));
+  const map = {};
+  (d.coins || []).forEach(c => { map[c.uuid] = normCoin(c); });
+  return map;
+}
+
+// Search coins by text query
+async function searchCoinsAPI(q) {
+  const d = await crGet('/coins?search=' + encodeURIComponent(q) + '&limit=8&referenceCurrencyUuid=' + curUuid());
+  return (d.coins || []).map(normCoin);
+}
+
+function normCoin(c) {
+  return {
+    uuid:      c.uuid,
+    name:      c.name      || c.uuid,
+    symbol:    c.symbol    || '??',
+    color:     c.color     || '#f0b429',
+    iconUrl:   c.iconUrl   || null,
+    price:     parseFloat(c.price)  || 0,
+    change24h: parseFloat(c.change) || 0,
+    at:        Date.now(),
+  };
+}
+
+// Refresh all held coin prices — one batch call, individual fallback for misses
+async function refreshPrices() {
+  if (!holdings.length) { renderAll(); return; }
+  const uuids = [...new Set(holdings.map(h => h.uuid))];
+
+  try {
+    const BATCH = 100;
+    for (let i = 0; i < uuids.length; i += BATCH) {
+      const batch = uuids.slice(i, i + BATCH);
+      const map   = await fetchBatch(batch);
+      Object.assign(coinCache, map);
+      // fetchBatch may miss some coins — fall back individually
+      for (const uuid of batch) {
+        if (!map[uuid]) {
+          try { coinCache[uuid] = await fetchByUuid(uuid); } catch(_) {}
+        }
+      }
+    }
+  } catch(e) {
+    console.warn('Batch price refresh failed, retrying individually:', e.message);
+    // Full fallback: refresh each coin individually
+    for (const uuid of uuids) {
+      try { coinCache[uuid] = await fetchByUuid(uuid); } catch(_) {}
+    }
+  }
+
+  localStorage.setItem(PORTS_KEY, JSON.stringify(portfolios)); // also write coinCache
+  portfolios[activePortId].coinCache = coinCache;
+  savePortfolios();
+  document.getElementById('lastUp').textContent =
+    'Updated ' + new Date().toLocaleTimeString() + ' · ' + activeCurrency.code;
+  renderAll();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  CURRENCY SELECTOR
+// ════════════════════════════════════════════════════════════════════
+const PRIORITY_CODES = ['USD','NZD','ZAR','EUR','GBP','AUD','CAD','JPY','CHF','SGD','HKD','INR','BTC','ETH'];
+
+// Known display signs for common currencies (API 'sign' field is sometimes missing)
+const CURRENCY_SIGNS = {
+  USD:'$', EUR:'€', GBP:'£', AUD:'A$', NZD:'NZ$', CAD:'C$',
+  JPY:'¥', CHF:'Fr', SGD:'S$', HKD:'HK$', INR:'₹', ZAR:'R',
+  BTC:'₿', ETH:'Ξ', BNB:'BNB', XRP:'XRP',
+};
+
+// Always-present fallback entries for currencies we must guarantee.
+// NZD and ZAR are NOT in Coinranking's /reference-currencies list,
+// so their UUIDs are hardcoded from the working Python implementation.
+const MUST_HAVE = [
+  { uuid: 'yhjMzLPhuIDl', symbol: 'USD', name: 'US Dollar',          sign: '$'   },
+  { uuid: 'jlhBX5IMqZzc', symbol: 'NZD', name: 'New Zealand Dollar', sign: 'NZ$' },
+  { uuid: '5IPIPRCm3C6O', symbol: 'ZAR', name: 'South African Rand', sign: 'R'   },
+  { uuid: '__EUR__',       symbol: 'EUR', name: 'Euro',               sign: '€'   },
+  { uuid: '__GBP__',       symbol: 'GBP', name: 'British Pound',      sign: '£'   },
+  { uuid: '__AUD__',       symbol: 'AUD', name: 'Australian Dollar',  sign: 'A$'  },
+  { uuid: '__CAD__',       symbol: 'CAD', name: 'Canadian Dollar',    sign: 'C$'  },
+  { uuid: '__JPY__',       symbol: 'JPY', name: 'Japanese Yen',       sign: '¥'   },
+];
+
+function buildCurrencyList(apiList) {
+  // Index the API list by symbol for fast lookup
+  const bySymbol = {};
+  (apiList || []).forEach(c => { bySymbol[c.symbol] = c; });
+
+  // Start with the API list (or empty)
+  const result = [...(apiList || [])];
+
+  // For each must-have currency, inject it if the API didn't return it
+  MUST_HAVE.forEach(mh => {
+    if (!bySymbol[mh.symbol]) {
+      result.push(mh); // API missed it — use our placeholder
+    }
+  });
+
+  // Normalise sign field across the whole list
+  result.forEach(c => {
+    if (!c.sign || c.sign.trim() === '') {
+      c.sign = CURRENCY_SIGNS[c.symbol] || c.symbol;
+    }
+  });
+
+  return result;
+}
+
+function populateSelectWith(list) {
+  const sel = document.getElementById('curSelect');
+
+  const priIdx = c => {
+    const i = PRIORITY_CODES.indexOf(c.symbol);
+    return i >= 0 ? i : 999;
+  };
+
+  const sorted = [...list].sort((a, b) => {
+    const pa = priIdx(a), pb = priIdx(b);
+    if (pa !== pb) return pa - pb;
+    return (a.symbol || '').localeCompare(b.symbol || '');
+  });
+
+  sel.innerHTML = '';
+  let dividerAdded = false;
+
+  sorted.forEach(c => {
+    if (!dividerAdded && priIdx(c) === 999) {
+      const d = document.createElement('option');
+      d.disabled = true;
+      d.textContent = '──────────────';
+      sel.appendChild(d);
+      dividerAdded = true;
+    }
+    const opt = document.createElement('option');
+    opt.value          = c.uuid;
+    opt.dataset.symbol = c.sign || CURRENCY_SIGNS[c.symbol] || c.symbol;
+    opt.dataset.code   = c.symbol || c.uuid;
+    opt.textContent    = c.symbol + (c.name ? ' — ' + c.name : '');
+
+    // Match by symbol code (most reliable) — UUID may have changed from placeholder
+    if (c.symbol === activeCurrency.code || c.uuid === activeCurrency.uuid) {
+      opt.selected = true;
+      // Update activeCurrency with the real UUID if we used a placeholder before
+      if (activeCurrency.uuid !== c.uuid) {
+        activeCurrency.uuid   = c.uuid;
+        activeCurrency.symbol = opt.dataset.symbol;
+        localStorage.setItem(CUR_KEY, JSON.stringify(activeCurrency));
+      }
+    }
+    sel.appendChild(opt);
+  });
+
+  sel.disabled = false;
+  // Re-sync the active portfolio's currency after the list is (re)populated
+  syncCurrencySelect();
+}
+
+async function loadCurrencies() {
+  // Step 1: populate immediately with must-have list so selector works right away
+  populateSelectWith(buildCurrencyList([]));
+
+  if (!apiKey) return;
+
+  try {
+    // Step 2: fetch full list via cursor pagination
+    const all = [];
+    let cursor = null;
+    for (let page = 0; page < 20; page++) {
+      const qs = cursor ? '?limit=100&cursor=' + encodeURIComponent(cursor) : '?limit=100';
+      const d  = await crGet('/reference-currencies' + qs);
+      const batch = d.currencies || [];
+      all.push(...batch);
+      // Try multiple possible pagination fields
+      cursor = d.stats?.cursor ?? d.pagination?.nextCursor ?? d.nextCursor ?? null;
+      if (!cursor || batch.length === 0) break;
+    }
+
+    if (all.length > 0) {
+      // Step 3: merge API list with must-haves and repopulate
+      populateSelectWith(buildCurrencyList(all));
+    }
+  } catch(e) {
+    console.warn('Currency list fetch failed, using must-have fallback:', e.message);
+  }
+}
+
+function onCurrencyChange() {
+  const sel = document.getElementById('curSelect');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || opt.disabled) return;
+
+  activeCurrency = {
+    uuid:   sel.value,
+    symbol: opt.dataset.symbol || '$',
+    code:   opt.dataset.code   || sel.value,
+  };
+  // Save currency preference into the active portfolio
+  portfolios[activePortId].currency = activeCurrency;
+  savePortfolios();
+  coinCache = {};
+  portfolios[activePortId].coinCache = {};
+  savePortfolios();
+  refreshPrices();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  API KEY UI
+// ════════════════════════════════════════════════════════════════════
+function syncApiBadge() {
+  const dot = document.getElementById('apiDot');
+  const lbl = document.getElementById('apiLabel');
+  if (apiKey) {
+    dot.className = 'dot on';
+    lbl.textContent = apiKey.slice(0, 8) + '…';
+  } else {
+    dot.className = 'dot';
+    lbl.textContent = 'No API key';
+  }
+}
+
+function openSettings() {
+  document.getElementById('apiKeyIn').value = apiKey;
+  document.getElementById('kPreview').textContent =
+    apiKey ? 'Saved: ' + apiKey.slice(0, 14) + '…' + apiKey.slice(-4) : 'No key saved';
+  openM('mSettings');
+}
+
+function saveKey() {
+  apiKey = document.getElementById('apiKeyIn').value.trim();
+  if (apiKey) localStorage.setItem(AKK, apiKey); else localStorage.removeItem(AKK);
+  syncApiBadge();
+  closeM('mSettings');
+  loadCurrencies();
+  refreshPrices();
+}
+
+function clearKey() {
+  apiKey = '';
+  localStorage.removeItem(AKK);
+  document.getElementById('apiKeyIn').value = '';
+  document.getElementById('kPreview').textContent = 'No key saved';
+  syncApiBadge();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  ADD / EDIT HOLDING
+// ════════════════════════════════════════════════════════════════════
+function openAdd(idx = null) {
+  editIdx = idx; activeCoin = null;
+  document.getElementById('mHoldingTitle').textContent = idx !== null ? 'Edit Holding' : 'Add Holding';
+  document.getElementById('coinSearchIn').value = '';
+  document.getElementById('searchDrop').style.display = 'none';
+  document.getElementById('searchDrop').innerHTML = '';
+  document.getElementById('coinPreview').style.display = 'none';
+  document.getElementById('amtIn').value = '';
+  document.getElementById('bpIn').value = '';
+  document.getElementById('descIn').value = '';
+
+  // Label reflects active currency so user knows what to enter
+  document.getElementById('bpLabel').textContent =
+    `Total Spent ${activeCurrency.code ? '(' + activeCurrency.code + ')' : ''} (optional)`;
+
+  if (idx !== null) {
+    const h = holdings[idx];
+    const c = coinCache[h.uuid] || {};
+    activeCoin = { uuid: h.uuid, name: c.name || h.uuid, symbol: c.symbol || '', color: c.color, iconUrl: c.iconUrl };
+    document.getElementById('coinSearchIn').value = c.name || h.uuid;
+    showPreview(activeCoin);
+    document.getElementById('amtIn').value  = h.amount;
+    document.getElementById('bpIn').value   = h.buyPrice || '';
+    document.getElementById('descIn').value = h.description || '';
+  }
+  openM('mHolding');
+}
+
+function debSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(doSearch, 360);
+}
+
+async function doSearch() {
+  const q   = document.getElementById('coinSearchIn').value.trim();
+  const drop = document.getElementById('searchDrop');
+  if (q.length < 2) { drop.style.display = 'none'; return; }
+
+  drop.style.display = 'block';
+  drop.innerHTML = '<div style="padding:9px 13px;color:var(--muted);font-family:var(--font-mono);font-size:0.73rem">Searching…</div>';
+
+  try {
+    const coins = await searchCoinsAPI(q);
+    if (!coins.length) {
+      drop.innerHTML = '<div style="padding:9px 13px;color:var(--muted);font-family:var(--font-mono);font-size:0.73rem">No results</div>';
+      return;
+    }
+    drop.innerHTML = coins.map(c => `
+      <div class="search-result-item" onclick='pickCoin(${JSON.stringify(c).replace(/'/g,"&#39;")})'>
+        ${icoHtml(c, 30)}
+        <div>
+          <div style="font-weight:700;font-size:0.87rem">${esc(c.name)}</div>
+          <div style="font-family:var(--font-mono);font-size:0.66rem;color:var(--muted)">${esc(c.symbol)} &middot; ${activeCurrency.symbol}${fmtP(c.price)}</div>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {
+    drop.innerHTML = `<div style="padding:9px 13px;color:var(--red);font-family:var(--font-mono);font-size:0.73rem">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function pickCoin(c) {
+  activeCoin = c;
+  coinCache[c.uuid] = { ...c, at: Date.now() };
+  localStorage.setItem(CK, JSON.stringify(coinCache));
+  document.getElementById('coinSearchIn').value = c.name;
+  document.getElementById('searchDrop').style.display = 'none';
+  showPreview(c);
+}
+
+function showPreview(c) {
+  document.getElementById('coinPreview').style.display = 'flex';
+  document.getElementById('previewIco').innerHTML = icoHtml(c, 30);
+  document.getElementById('previewNm').textContent  = c.name;
+  document.getElementById('previewSy').textContent  = c.symbol;
+}
+
+function saveHolding() {
+  if (!activeCoin) { alert('Please select a coin.'); return; }
+  const amount   = parseFloat(document.getElementById('amtIn').value);
+  const buyPrice = parseFloat(document.getElementById('bpIn').value) || null;
+  const desc     = document.getElementById('descIn').value.trim();
+  if (!amount || amount <= 0) { alert('Enter a valid amount.'); return; }
+
+  const entry = { uuid: activeCoin.uuid, amount, buyPrice, description: desc };
+
+  if (editIdx !== null) {
+    // Editing an existing row — update in place
+    holdings[editIdx] = entry;
+  } else {
+    // Check for an exact duplicate (same uuid, same amount, same description)
+    const exactDupe = holdings.some(h =>
+      h.uuid === activeCoin.uuid &&
+      h.amount === amount &&
+      (h.description || '') === desc
+    );
+    if (exactDupe && !confirm('An identical entry already exists. Add another anyway?')) {
+      return;
+    }
+    holdings.push(entry);
+  }
+
+  persist(); closeM('mHolding'); refreshPrices();
+}
+
+function delHolding(idx) {
+  if (!confirm('Remove this holding?')) return;
+  holdings.splice(idx, 1);
+  persist(); renderAll();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  IMPORT
+// ════════════════════════════════════════════════════════════════════
+function openImport() {
+  document.getElementById('importTA').value = '';
+  document.getElementById('importProg').style.display = 'none';
+  document.getElementById('ilog').innerHTML = '';
+  document.getElementById('pBar').style.width = '0%';
+  document.getElementById('importRunBtn').disabled = false;
+  document.getElementById('importRunBtn').textContent = 'Import';
+  document.getElementById('importCancelBtn').textContent = 'Cancel';
+  openM('mImport');
+}
+
+function iLog(html) {
+  const el = document.getElementById('ilog');
+  el.innerHTML += html + '<br>';
+  el.scrollTop = el.scrollHeight;
+}
+
+async function runImport() {
+  if (!apiKey) {
+    alert('Please configure your Coinranking API key first (click the key badge in the nav).');
+    return;
+  }
+
+  let items;
+  try {
+    items = JSON.parse(document.getElementById('importTA').value.trim());
+    if (!Array.isArray(items)) items = [items];
+  } catch(e) { alert('Invalid JSON:\n' + e.message); return; }
+
+  const valid = items.filter(i => i.coinrankingUuid && i.amount != null && !isNaN(parseFloat(i.amount)));
+  if (!valid.length) {
+    alert('No valid entries. Each item must have "coinrankingUuid" and "amount".');
+    return;
+  }
+
+  // Lock UI
+  const runBtn = document.getElementById('importRunBtn');
+  runBtn.disabled = true; runBtn.textContent = 'Importing…';
+  document.getElementById('importCancelBtn').textContent = 'Close';
+  document.getElementById('importProg').style.display = 'block';
+  document.getElementById('ilog').innerHTML = '';
+
+  const mode = document.getElementById('importMode').value;
+  if (mode === 'replace') {
+    holdings = [];
+    iLog('<span style="color:var(--red)">⚠ Existing portfolio cleared.</span>');
+  }
+
+  const total = valid.length;
+  let ok = 0, failed = 0;
+
+  // Step 1: attempt batch resolution (saves API calls for coins in top rankings)
+  iLog(`<span style="color:var(--muted)">↻ Batch resolving ${total} UUID${total !== 1 ? 's' : ''}…</span>`);
+  const allUuids = [...new Set(valid.map(i => i.coinrankingUuid))];
+  const batchMap = {};
+  try {
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < allUuids.length; i += BATCH_SIZE) {
+      const map = await fetchBatch(allUuids.slice(i, i + BATCH_SIZE));
+      Object.assign(batchMap, map);
+    }
+    const batchHits = Object.keys(batchMap).length;
+    const batchMiss = allUuids.length - batchHits;
+    iLog(`<span style="color:var(--muted)">Batch: ${batchHits} found, ${batchMiss} need individual lookup.</span>`);
+  } catch(e) {
+    iLog(`<span style="color:var(--muted)">Batch failed (${esc(e.message)}) — resolving all individually.</span>`);
+  }
+
+  // Step 2: process each item, falling back to /coin/:uuid for any batch misses
+  for (let i = 0; i < valid.length; i++) {
+    const item     = valid[i];
+    const uuid     = item.coinrankingUuid;
+    const amount   = parseFloat(item.amount);
+    const desc     = (item.description || '').trim();
+    const buyPrice = item.buyPrice != null && !isNaN(parseFloat(item.buyPrice))
+      ? parseFloat(item.buyPrice) : null;
+
+    try {
+      let coin = batchMap[uuid];
+      if (!coin) {
+        iLog(`<span style="color:var(--muted)">  ↻ Looking up ${esc(uuid)}…</span>`);
+        coin = await fetchByUuid(uuid);
+      }
+      coinCache[uuid] = coin;
+
+      // Only treat as duplicate if uuid AND description AND amount all match
+      const isDupe = holdings.some(h =>
+        h.uuid === uuid &&
+        (h.description || '').trim() === desc &&
+        h.amount === amount
+      );
+
+      if (isDupe) {
+        iLog(`<span style="color:var(--muted)">⟳ Skipped</span> <b>${esc(coin.name)}</b> — identical entry already exists`);
+      } else {
+        holdings.push({ uuid, amount, buyPrice, description: desc });
+        iLog(`<span style="color:var(--green)">✓ Added</span> <b>${esc(coin.name)}</b> (${coin.symbol}) · ${fmtA(amount)}${buyPrice != null ? ' · cost ' + activeCurrency.symbol + fmtP(buyPrice) : ''}${desc ? ' · ' + esc(desc) : ''}`);
+      }
+      ok++;
+    } catch(e) {
+      iLog(`<span style="color:var(--red)">✕ Failed</span> ${esc(uuid)} — ${esc(e.message)}`);
+      failed++;
+    }
+
+    document.getElementById('pBar').style.width = ((i + 1) / total * 100) + '%';
+    document.getElementById('pLabel').textContent = (i + 1) + ' / ' + total;
+  }
+
+  portfolios[activePortId].coinCache = coinCache;
+  savePortfolios();
+  iLog('');
+  iLog(`<span style="color:var(--accent)">━━ Complete: ${ok} imported, ${failed} failed ━━</span>`);
+  runBtn.textContent = '✓ Done';
+  renderAll();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SYNC — BACKUP & RESTORE ALL PORTFOLIOS
+// ════════════════════════════════════════════════════════════════════
+function openSync() {
+  document.getElementById('syncRestoreTA').value = '';
+  openM('mSync');
+}
+
+function exportAllPortfolios() {
+  // Strip coinCache from the backup to keep file size small — prices refresh on load anyway
+  const clean = {};
+  Object.entries(portfolios).forEach(([id, p]) => {
+    clean[id] = { name: p.name, holdings: p.holdings, currency: p.currency };
+  });
+  const backup = { version: 1, exportedAt: new Date().toISOString(), activePortId, portfolios: clean };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(blob),
+    download: 'cryptohodl-backup-' + new Date().toISOString().slice(0,10) + '.json',
+  });
+  a.click();
+}
+
+function restoreAllPortfolios() {
+  const raw = document.getElementById('syncRestoreTA').value.trim();
+  if (!raw) { alert('Please paste your backup JSON first.'); return; }
+
+  let backup;
+  try {
+    backup = JSON.parse(raw);
+  } catch(e) { alert('Invalid JSON:\n' + e.message); return; }
+
+  if (!backup.portfolios || typeof backup.portfolios !== 'object') {
+    alert('This doesn\'t look like a CryptoHodl backup file.'); return;
+  }
+
+  const mode = document.getElementById('syncRestoreMode').value;
+  const incoming = backup.portfolios;
+
+  if (mode === 'replace') {
+    if (!confirm('This will overwrite ALL your current portfolios. Are you sure?')) return;
+    portfolios = {};
+    Object.entries(incoming).forEach(([id, p]) => {
+      portfolios[id] = { name: p.name, holdings: p.holdings || [], coinCache: {}, currency: p.currency || { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' } };
+    });
+    activePortId = backup.activePortId && portfolios[backup.activePortId]
+      ? backup.activePortId : Object.keys(portfolios)[0];
+  } else {
+    // Merge — for each incoming portfolio:
+    //   • If ID doesn't exist locally → add it
+    //   • If ID exists locally but local copy is empty and backup has holdings → overwrite it
+    //   • If ID exists locally with holdings → skip (don't clobber real data)
+    let added = 0, overwritten = 0, skipped = 0;
+    Object.entries(incoming).forEach(([id, p]) => {
+      const local = portfolios[id];
+      const incomingHoldings = p.holdings || [];
+      if (!local) {
+        portfolios[id] = { name: p.name, holdings: incomingHoldings, coinCache: {}, currency: p.currency || { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' } };
+        added++;
+      } else if ((!local.holdings || local.holdings.length === 0) && incomingHoldings.length > 0) {
+        // Local is empty placeholder — overwrite with backup data
+        portfolios[id] = { name: p.name, holdings: incomingHoldings, coinCache: {}, currency: p.currency || local.currency || { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' } };
+        overwritten++;
+      } else {
+        skipped++;
+      }
+    });
+    const total = added + overwritten;
+    if (total === 0) { alert(`No portfolios updated — ${skipped} already exist with holdings locally.`); return; }
+    const parts = [];
+    if (added)       parts.push(`${added} added`);
+    if (overwritten) parts.push(`${overwritten} restored from backup`);
+    if (skipped)     parts.push(`${skipped} skipped (already have holdings)`);
+    alert(parts.join(', ') + '.');
+  }
+
+  // Load the active portfolio
+  holdings       = portfolios[activePortId].holdings  || [];
+  coinCache      = portfolios[activePortId].coinCache || {};
+  activeCurrency = portfolios[activePortId].currency  || { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' };
+
+  savePortfolios();
+  localStorage.setItem(ACTIVE_KEY, activePortId);
+  renderPortSelect();
+  syncCurrencySelect();
+  renderAll();
+  if (apiKey) refreshPrices();
+  closeM('mSync');
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  RENDER
+// ════════════════════════════════════════════════════════════════════
+
+function renderAll() { renderTicker(); renderSummary(); renderTable(); }
+
+function renderTicker() {
+  const coins = Object.values(coinCache).filter(c => c.price > 0);
+  if (!coins.length) return;
+  const sym = activeCurrency.symbol;
+  const half = [...coins, ...coins].map(c => {
+    const chg = c.change24h || 0;
+    const cls = chg >= 0 ? 'pos' : 'neg';
+    return `<span class="ticker-item">
+      ${c.iconUrl ? `<img class="ticker-icon" src="${c.iconUrl}" alt="">` : ''}
+      <span class="ticker-sym">${esc(c.symbol)}</span>
+      <span style="color:var(--muted)">${sym}${fmtP(c.price)}</span>
+      <span class="${cls}">${chg >= 0 ? '▲' : '▼'}${Math.abs(chg).toFixed(2)}%</span>
+    </span>`;
+  }).join('');
+  document.getElementById('ticker').innerHTML = half;
+}
+
+function renderSummary() {
+  let tot = 0, inv = 0, day = 0;
+  holdings.forEach(h => {
+    const c = coinCache[h.uuid];
+    if (!c) return;
+    const v = c.price * h.amount;
+    tot += v;
+    if (h.buyPrice) inv += h.buyPrice;  // buyPrice is now total spent, not price per coin
+    day += v * (c.change24h || 0) / 100;
+  });
+
+  const sym = activeCurrency.symbol;
+
+  document.getElementById('sTotal').textContent = sym + fmtU(tot);
+  document.getElementById('sInvested').textContent = sym + fmtU(inv);
+
+  const pnl = inv > 0 ? tot - inv : 0;
+  const pnlPct = inv > 0 ? pnl / inv * 100 : 0;
+  const pnlEl = document.getElementById('sPnl');
+  if (inv > 0) {
+    const s = pnl >= 0 ? '+' : '';
+    pnlEl.textContent = `${s}${sym}${fmtU(Math.abs(pnl))} (${s}${pnlPct.toFixed(2)}%) all time`;
+    pnlEl.className   = 'ssub ' + (pnl >= 0 ? 'pos' : 'neg');
+  } else { pnlEl.textContent = '—'; pnlEl.className = 'ssub'; }
+
+  const dEl  = document.getElementById('sDay');
+  const dpEl = document.getElementById('sDayPct');
+  if (holdings.length && tot > 0) {
+    const s   = day >= 0 ? '+' : '';
+    const pct = (day / (tot - day)) * 100;
+    dEl.textContent  = `${s}${sym}${fmtU(Math.abs(day))}`;
+    dEl.className    = 'svalue ' + (day >= 0 ? 'pos' : 'neg');
+    dpEl.textContent = `${s}${pct.toFixed(2)}% today`;
+    dpEl.className   = 'ssub ' + (day >= 0 ? 'pos' : 'neg');
+  } else { dEl.textContent = '—'; dEl.className = 'svalue'; dpEl.textContent = '—'; }
+}
+
+function renderTable() {
+  const body  = document.getElementById('tBody');
+  const empty = document.getElementById('emptyState');
+  if (!holdings.length) { body.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+
+  const sym = activeCurrency.symbol;
+
+  let tot = 0;
+  holdings.forEach(h => { const c = coinCache[h.uuid]; if (c) tot += c.price * h.amount; });
+
+  const sorted = holdings.map((h, i) => ({...h, _i: i}))
+    .sort((a, b) => ((coinCache[b.uuid]?.price||0)*b.amount) - ((coinCache[a.uuid]?.price||0)*a.amount));
+
+  body.innerHTML = sorted.map(h => {
+    const c   = coinCache[h.uuid] || {};
+    const val = (c.price || 0) * h.amount;
+    const pct = tot > 0 ? val / tot * 100 : 0;
+    const chg = c.change24h || 0;
+    const s   = chg >= 0 ? '+' : '';
+
+    // P&L — only if total spent is set
+    let plCell = '<td style="text-align:right;color:var(--muted);font-family:var(--font-mono);font-size:0.75rem">—</td>';
+    if (h.buyPrice && c.price) {
+      const cost   = h.buyPrice;  // total spent directly
+      const pl     = val - cost;
+      const plPct  = cost > 0 ? (pl / cost) * 100 : 0;
+      const plSign = pl >= 0 ? '+' : '';
+      const plCls  = pl >= 0 ? 'pos' : 'neg';
+      plCell = `<td style="text-align:right">
+        <div style="font-family:var(--font-mono);font-size:0.82rem;font-weight:700" class="${plCls}">${plSign}${sym}${fmtU(Math.abs(pl))}</div>
+        <div style="font-family:var(--font-mono);font-size:0.68rem" class="${plCls}">${plSign}${plPct.toFixed(2)}%</div>
+      </td>`;
+    }
+
+    return `<tr>
+      <td>
+        <div class="coin-info">
+          ${icoHtml(c, 36)}
+          <div>
+            <div class="cname">${esc(c.name || h.uuid)}</div>
+            <div class="csym">${esc(c.symbol || '')}</div>
+            ${h.description ? `<div class="cdesc" title="${esc(h.description)}">${esc(h.description)}</div>` : ''}
+          </div>
+        </div>
+      </td>
+      <td><span class="price-val">${sym}${fmtP(c.price||0)}</span></td>
+      <td><span class="cbadge ${chg>=0?'pos':'neg'}">${s}${chg.toFixed(2)}%</span></td>
+      <td style="font-family:var(--font-mono);font-size:0.82rem">${fmtA(h.amount)} ${esc(c.symbol||'')}</td>
+      <td style="font-family:var(--font-mono);font-size:0.82rem;font-weight:700">${sym}${fmtU(val)}</td>
+      ${plCell}
+      <td>
+        <div class="abar-wrap">
+          <div class="abar"><div class="abar-fill" style="width:${pct}%"></div></div>
+          <span class="apct">${pct.toFixed(0)}%</span>
+        </div>
+      </td>
+      <td>
+        <div class="row-actions">
+          <button class="icon-btn" onclick="openAdd(${h._i})" title="Edit">✎</button>
+          <button class="icon-btn del" onclick="delHolding(${h._i})" title="Delete">✕</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  EXPORT
+// ════════════════════════════════════════════════════════════════════
+function exportCSV() {
+  if (!holdings.length) { alert('Nothing to export.'); return; }
+  let csv = 'UUID,Name,Symbol,Amount,Price,Value,24h Change %,Total Spent,P/L,Description\n';
+  holdings.forEach(h => {
+    const c   = coinCache[h.uuid] || {};
+    const val = (c.price||0) * h.amount;
+    const pl  = h.buyPrice ? val - h.buyPrice : '';
+    csv += [h.uuid, c.name||'', c.symbol||'', h.amount,
+      c.price||'', val.toFixed(2), (c.change24h||0).toFixed(2),
+      h.buyPrice||'', pl!==''?pl.toFixed(2):'',
+      '"'+(h.description||'').replace(/"/g,'""')+'"'
+    ].join(',') + '\n';
+  });
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([csv],{type:'text/csv'})),
+    download: 'cryptohodl.csv'
+  });
+  a.click();
+}
+
+function exportJSON() {
+  if (!holdings.length) { alert('Nothing to export.'); return; }
+  const out = holdings.map((h, i) => ({
+    id:              i + 1,
+    coinrankingUuid: h.uuid,
+    amount:          h.amount,
+    buyPrice:        h.buyPrice ?? null,
+    description:     h.description || '',
+  }));
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], {type:'application/json'})),
+    download: 'cryptohodl.json'
+  });
+  a.click();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  UTILS
+// ════════════════════════════════════════════════════════════════════
+function icoHtml(c, sz) {
+  const bg  = (c.color||'#f0b429') + '22';
+  const col = c.color || '#f0b429';
+  const sym = (c.symbol||'??').slice(0,3);
+  const is  = Math.round(sz * 0.62);
+  if (c.iconUrl) return `<div class="cicon" style="width:${sz}px;height:${sz}px;background:${bg}">
+    <img src="${c.iconUrl}" width="${is}" height="${is}" alt="${esc(sym)}"
+      onerror="this.parentNode.innerHTML='${sym}';this.parentNode.style.color='${col}';this.parentNode.style.fontSize='0.7rem';this.parentNode.style.fontWeight='700'">
+  </div>`;
+  return `<div class="cicon" style="width:${sz}px;height:${sz}px;background:${bg};color:${col};font-size:0.7rem;font-weight:700">${sym}</div>`;
+}
+
+function fmtP(n) {
+  if (!n) return '0.00';
+  if (n >= 1)    return n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if (n >= 0.01) return n.toFixed(4);
+  return n.toFixed(6);
+}
+function fmtU(n) {
+  return (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function fmtA(n) {
+  if (n >= 1000) return n.toLocaleString('en-US',{maximumFractionDigits:2});
+  if (n >= 1)    return n.toFixed(4);
+  return n.toFixed(6);
+}
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function persist() {
+  portfolios[activePortId].holdings = holdings;
+  savePortfolios();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  MODAL HELPERS
+// ════════════════════════════════════════════════════════════════════
+function openM(id)  { document.getElementById(id).classList.add('open'); }
+function closeM(id) { document.getElementById(id).classList.remove('open'); }
+function bgClose(e,id) { if (e.target===document.getElementById(id)) closeM(id); }
+
+// ════════════════════════════════════════════════════════════════════
+//  BOOT
+// ════════════════════════════════════════════════════════════════════
+syncApiBadge();
+renderPortSelect();
+renderAll();
+loadCurrencies();      // always runs — uses fallback if no API key
+syncCurrencySelect();  // set dropdown to match active portfolio's currency
+if (apiKey) refreshPrices();
+setInterval(refreshPrices, 60000);
+</script>
+</body>
+</html>

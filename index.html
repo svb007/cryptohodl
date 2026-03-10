@@ -42,6 +42,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -214,7 +215,7 @@
 
     @media (max-width: 768px) {
       .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 16px; }
-      table { min-width: 780px; }
+      table { min-width: 420px; }
     }
 
     .coin-info { display: flex; align-items: center; gap: 11px; }
@@ -476,14 +477,16 @@
 
   <div class="section-header">
     <div class="section-title">Holdings</div>
-    <div style="font-family:var(--font-mono);font-size:0.71rem;color:var(--muted)" id="lastUp"></div>
+    <div style="display:flex;align-items:center;gap:14px">
+      <span style="font-family:var(--font-mono);font-size:0.63rem;color:var(--muted)">Tap row to edit</span>
+      <div style="font-family:var(--font-mono);font-size:0.71rem;color:var(--muted)" id="lastUp"></div>
+    </div>
   </div>
 
   <div class="table-wrap">
     <table>
       <thead><tr>
-        <th>Asset</th><th>Price</th><th>24h</th>
-        <th>Holdings</th><th>Value</th><th>P&amp;L</th><th>Alloc</th><th></th>
+        <th>Asset</th><th>Price</th><th>Value / Alloc</th><th>P&amp;L / 24h</th>
       </tr></thead>
       <tbody id="tBody"></tbody>
     </table>
@@ -555,6 +558,7 @@
     </div>
     <div class="mactions">
       <button class="btn-ghost" onclick="closeM('mHolding')">Cancel</button>
+      <button id="mHoldingDel" class="btn-ghost" style="display:none;color:var(--red);border-color:var(--red)" onclick="delFromModal()">Delete</button>
       <button class="btn-primary" onclick="saveHolding()">Save</button>
     </div>
   </div>
@@ -683,7 +687,7 @@
 
       <!-- Scan button (shown on mobile) -->
       <div id="qrScanWrap" style="display:none;margin-top:4px">
-        <button class="btn-primary" style="width:100%;background:var(--green);border-color:var(--green);color:#000" onclick="startQRScan()">📷 Scan QR Code</button>
+        <button id="qrScanBtn" class="btn-primary" style="width:100%;background:var(--green);border-color:var(--green);color:#000" onclick="startQRScan()">📷 Scan QR Code</button>
         <div style="margin-top:10px">
           <video id="qrVideo" style="width:100%;border-radius:10px;display:none"></video>
           <canvas id="qrScanCanvas" style="display:none"></canvas>
@@ -1252,7 +1256,8 @@ function openAdd(idx = null) {
   document.getElementById('bpIn').value = '';
   document.getElementById('descIn').value = '';
 
-  // Label reflects active currency so user knows what to enter
+  // Show delete button only when editing an existing holding
+  document.getElementById('mHoldingDel').style.display = idx !== null ? 'block' : 'none';
   document.getElementById('bpLabel').textContent =
     `Total Spent ${activeCurrency.code ? '(' + activeCurrency.code + ')' : ''} (optional)`;
 
@@ -1350,6 +1355,12 @@ function delHolding(idx) {
   if (!confirm('Remove this holding?')) return;
   holdings.splice(idx, 1);
   persist(); renderAll();
+}
+
+function delFromModal() {
+  if (editIdx === null) return;
+  closeM('mHolding');
+  delHolding(editIdx);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1568,53 +1579,61 @@ function generateQR() {
 
 // ── QR Scanner (for iPhone importing) ──
 let qrScanInterval = null;
+let qrScanStream   = null;
 
 async function startQRScan() {
-  const video      = document.getElementById('qrVideo');
-  const canvas     = document.getElementById('qrScanCanvas');
-  const statusEl   = document.getElementById('qrScanStatus');
-  const ctx        = canvas.getContext('2d');
+  const video    = document.getElementById('qrVideo');
+  const canvas   = document.getElementById('qrScanCanvas');
+  const statusEl = document.getElementById('qrScanStatus');
+  const scanBtn  = document.getElementById('qrScanBtn');
+  const ctx      = canvas.getContext('2d');
+
+  // Stop any existing scan first
+  if (qrScanStream) stopQRScan();
 
   statusEl.textContent = 'Starting camera…';
+  if (scanBtn) { scanBtn.textContent = '⏹ Stop Scanning'; scanBtn.onclick = stopQRScan; }
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    video.srcObject = stream;
+    qrScanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    video.srcObject = qrScanStream;
     video.setAttribute('playsinline', true);
     video.style.display = 'block';
     await video.play();
-
     statusEl.textContent = 'Point camera at QR code…';
 
     qrScanInterval = setInterval(() => {
       if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+      if (typeof jsQR === 'undefined') return; // wait for library to load
+
       canvas.width  = video.videoWidth;
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-      // Use jsQR if available, otherwise show manual paste fallback
-      if (typeof jsQR !== 'undefined') {
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-        if (code) {
-          stopQRScan(stream, video);
-          statusEl.textContent = '✓ QR code detected!';
-          handleScannedQR(code.data);
-        }
-      } else {
-        stopQRScan(stream, video);
-        statusEl.textContent = 'Scanner unavailable — please use the Restore tab to paste the backup JSON.';
+      const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+      if (code) {
+        stopQRScan();
+        statusEl.textContent = '✓ QR code detected!';
+        handleScannedQR(code.data);
       }
-    }, 300);
+    }, 250);
   } catch(e) {
-    statusEl.textContent = 'Camera access denied. Please allow camera access and try again.';
+    statusEl.textContent = 'Could not access camera: ' + e.message;
+    if (scanBtn) { scanBtn.textContent = '📷 Scan QR Code'; scanBtn.onclick = startQRScan; }
   }
 }
 
-function stopQRScan(stream, video) {
+function stopQRScan() {
   clearInterval(qrScanInterval);
-  stream.getTracks().forEach(t => t.stop());
-  video.style.display = 'none';
+  qrScanInterval = null;
+  if (qrScanStream) {
+    qrScanStream.getTracks().forEach(t => t.stop());
+    qrScanStream = null;
+  }
+  const video   = document.getElementById('qrVideo');
+  const scanBtn = document.getElementById('qrScanBtn');
+  if (video)   video.style.display = 'none';
+  if (scanBtn) { scanBtn.textContent = '📷 Scan QR Code'; scanBtn.onclick = startQRScan; }
 }
 
 function handleScannedQR(data) {
@@ -1793,49 +1812,43 @@ function renderTable() {
     const val = (c.price || 0) * h.amount;
     const pct = tot > 0 ? val / tot * 100 : 0;
     const chg = c.change24h || 0;
-    const s   = chg >= 0 ? '+' : '';
+    const chgSign = chg >= 0 ? '+' : '';
+    const chgCls  = chg >= 0 ? 'pos' : 'neg';
 
-    // P&L — only if total spent is set
-    let plCell = '<td style="text-align:right;color:var(--muted);font-family:var(--font-mono);font-size:0.75rem">—</td>';
+    // P&L
+    let plHtml = '<span style="color:var(--muted);font-size:0.72rem">—</span>';
     if (h.buyPrice && c.price) {
-      const cost   = h.buyPrice;  // total spent directly
+      const cost   = h.buyPrice;
       const pl     = val - cost;
       const plPct  = cost > 0 ? (pl / cost) * 100 : 0;
       const plSign = pl >= 0 ? '+' : '';
       const plCls  = pl >= 0 ? 'pos' : 'neg';
-      plCell = `<td style="text-align:right">
-        <div style="font-family:var(--font-mono);font-size:0.82rem;font-weight:700" class="${plCls}">${plSign}${sym}${fmtU(Math.abs(pl))}</div>
-        <div style="font-family:var(--font-mono);font-size:0.68rem" class="${plCls}">${plSign}${plPct.toFixed(2)}%</div>
-      </td>`;
+      plHtml = `<div style="font-family:var(--font-mono);font-size:0.78rem;font-weight:700" class="${plCls}">${plSign}${sym}${fmtU(Math.abs(pl))}</div>
+                <div style="font-family:var(--font-mono);font-size:0.67rem" class="${plCls}">${plSign}${plPct.toFixed(2)}%</div>`;
     }
 
-    return `<tr>
+    return `<tr style="cursor:pointer" onclick="openAdd(${h._i})" title="Click to edit">
       <td>
         <div class="coin-info">
           ${icoHtml(c, 36)}
           <div>
             <div class="cname">${esc(c.name || h.uuid)}</div>
             <div class="csym">${esc(c.symbol || '')}</div>
-            ${h.description ? `<div class="cdesc" title="${esc(h.description)}">${esc(h.description)}</div>` : ''}
+            <div class="cdesc">${fmtA(h.amount)} ${esc(c.symbol||'')}${h.description ? ' · ' + esc(h.description) : ''}</div>
           </div>
         </div>
       </td>
       <td><span class="price-val">${sym}${fmtP(c.price||0)}</span></td>
-      <td><span class="cbadge ${chg>=0?'pos':'neg'}">${s}${chg.toFixed(2)}%</span></td>
-      <td style="font-family:var(--font-mono);font-size:0.82rem">${fmtA(h.amount)} ${esc(c.symbol||'')}</td>
-      <td style="font-family:var(--font-mono);font-size:0.82rem;font-weight:700">${sym}${fmtU(val)}</td>
-      ${plCell}
-      <td>
-        <div class="abar-wrap">
+      <td style="text-align:right">
+        <div style="font-family:var(--font-mono);font-size:0.82rem;font-weight:700">${sym}${fmtU(val)}</div>
+        <div style="display:flex;align-items:center;gap:5px;justify-content:flex-end;margin-top:3px">
           <div class="abar"><div class="abar-fill" style="width:${pct}%"></div></div>
           <span class="apct">${pct.toFixed(0)}%</span>
         </div>
       </td>
-      <td>
-        <div class="row-actions">
-          <button class="icon-btn" onclick="openAdd(${h._i})" title="Edit">✎</button>
-          <button class="icon-btn del" onclick="delHolding(${h._i})" title="Delete">✕</button>
-        </div>
+      <td style="text-align:right">
+        ${plHtml}
+        <div style="margin-top:3px"><span class="cbadge ${chgCls}" style="font-size:0.67rem">${chgSign}${chg.toFixed(2)}%</span></div>
       </td>
     </tr>`;
   }).join('');

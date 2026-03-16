@@ -1420,12 +1420,21 @@ function renderStats(c) {
     ? new Date(c.allTimeHigh.timestamp * 1000).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
     : '—';
 
+  const chg     = parseFloat(c.change) || 0;
+  const chgSign = chg >= 0 ? '+' : '';
+  const chgCol  = chg >= 0 ? 'var(--green)' : 'var(--red)';
+  const chgBadge = chg !== 0
+    ? `<span style="font-size:0.62rem;font-weight:700;color:${chgCol};margin-left:5px">${chgSign}${chg.toFixed(2)}%</span>`
+    : '';
+
   const rows = [
     { label: 'Rank',          value: c.rank ? '#' + c.rank : '—' },
-    { label: 'Market Cap',    value: c.marketCap     ? sym + fmtBig(c.marketCap)     : '—' },
-    { label: 'Volume 24h',    value: c['24hVolume']  ? sym + fmtBig(c['24hVolume'])  : '—' },
+    { label: 'Market Cap',    value: c.marketCap    ? sym + fmtBig(c.marketCap)    : '—', badge: chgBadge },
+    { label: 'Volume 24h',    value: c['24hVolume'] ? sym + fmtBig(c['24hVolume']) : '—', badge: chgBadge },
     { label: 'Circ. Supply',  value: c.supply?.circulating
         ? fmtBig(c.supply.circulating) + ' ' + esc(c.symbol) : '—' },
+    { label: 'Total Supply',  value: c.supply?.total
+        ? fmtBig(c.supply.total) + ' ' + esc(c.symbol) : '—' },
     { label: 'Max Supply',    value: c.supply?.max
         ? fmtBig(c.supply.max) + ' ' + esc(c.symbol) : '∞' },
     { label: 'All Time High', value: c.allTimeHigh?.price
@@ -1433,15 +1442,45 @@ function renderStats(c) {
       sub: athDate, full: true },
   ];
 
+  // Sparkline — 7d price history as a tiny SVG polyline
+  let sparkHtml = '';
+  const prices = (c.sparkline || []).filter(p => p != null).map(Number);
+  if (prices.length >= 2) {
+    const min  = Math.min(...prices);
+    const max  = Math.max(...prices);
+    const range = max - min || 1;
+    const W = 260, H = 36, PAD = 2;
+    const pts = prices.map((p, i) => {
+      const x = PAD + (i / (prices.length - 1)) * (W - PAD * 2);
+      const y = PAD + (1 - (p - min) / range) * (H - PAD * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const last  = prices[prices.length - 1];
+    const first = prices[0];
+    const col   = last >= first ? 'var(--green)' : 'var(--red)';
+    sparkHtml = `
+      <div class="stats-row full-width" style="padding:10px 14px 12px">
+        <div class="stats-label" style="margin-bottom:6px">7-Day Price</div>
+        <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none"
+             style="display:block;overflow:visible">
+          <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5"
+                    stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>
+      </div>`;
+  }
+
   document.getElementById('statsContent').innerHTML = `
     <div class="stats-grid">
       ${rows.map(r => `
         <div class="stats-row${r.full ? ' full-width' : ''}">
           <div class="stats-label">${r.label}</div>
-          <div class="stats-value">${r.value}</div>
+          <div class="stats-value" style="display:flex;align-items:baseline;flex-wrap:wrap;gap:2px">
+            ${r.value}${r.badge || ''}
+          </div>
           ${r.sub ? `<div class="stats-sub">${r.sub}</div>` : ''}
         </div>`
       ).join('')}
+      ${sparkHtml}
     </div>`;
 }
 

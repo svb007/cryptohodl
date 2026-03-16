@@ -360,6 +360,45 @@
     .sync-tab:hover { color: var(--text); border-color: var(--muted); }
     .sync-tab.active { background: var(--accent); border-color: var(--accent); color: #000; }
 
+    /* STATS PANEL */
+    .stats-btn {
+      font-family: var(--font-mono); font-size: 0.68rem; font-weight: 700;
+      padding: 5px 9px; border-radius: 7px; flex-shrink: 0;
+      background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .stats-btn:hover, .stats-btn.open { border-color: var(--accent); color: var(--accent); }
+    .stats-panel {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+    .stats-loading {
+      padding: 14px 16px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+    }
+    .stats-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+    }
+    .stats-row {
+      display: flex; flex-direction: column; padding: 10px 14px;
+      border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);
+    }
+    .stats-row:nth-child(even) { border-right: none; }
+    .stats-row:nth-last-child(-n+2) { border-bottom: none; }
+    .stats-row.full-width {
+      grid-column: 1 / -1; border-right: none;
+    }
+    .stats-row.full-width:last-child { border-bottom: none; }
+    .stats-label {
+      font-family: var(--font-mono); font-size: 0.55rem; color: var(--muted);
+      letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 4px;
+    }
+    .stats-value {
+      font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700; color: var(--text);
+    }
+    .stats-sub {
+      font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); margin-top: 2px;
+    }
+
     /* SETTINGS */
     .sinfo { font-size: 0.79rem; color: var(--muted); line-height: 1.65; margin-bottom: 16px; }
     .sinfo a { color: var(--accent); text-decoration: none; }
@@ -576,9 +615,17 @@
 
     <div id="coinPreview" class="coin-preview" style="display:none">
       <div id="previewIco"></div>
-      <div>
+      <div style="flex:1">
         <div id="previewNm" style="font-weight:700;font-size:0.9rem"></div>
         <div id="previewSy" style="font-family:var(--font-mono);font-size:0.67rem;color:var(--muted)"></div>
+      </div>
+      <button id="statsBtn" class="stats-btn" onclick="toggleStats()" title="Show coin stats">📊 Stats ▾</button>
+    </div>
+
+    <!-- Stats panel — expands below coin preview -->
+    <div id="statsPanel" style="display:none;margin-bottom:14px">
+      <div id="statsContent" class="stats-panel">
+        <div class="stats-loading">Loading stats…</div>
       </div>
     </div>
 
@@ -1294,6 +1341,9 @@ function openAdd(idx = null) {
   document.getElementById('bpIn').value = '';
   document.getElementById('descIn').value = '';
 
+  // Reset stats panel
+  closeStats();
+
   // Show delete button only when editing an existing holding
   document.getElementById('mHoldingDel').style.display = idx !== null ? 'block' : 'none';
   document.getElementById('bpLabel').textContent =
@@ -1310,6 +1360,89 @@ function openAdd(idx = null) {
     document.getElementById('descIn').value = h.description || '';
   }
   openM('mHolding');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  COIN STATS
+// ════════════════════════════════════════════════════════════════════
+function closeStats() {
+  document.getElementById('statsPanel').style.display = 'none';
+  document.getElementById('statsBtn').classList.remove('open');
+  document.getElementById('statsBtn').textContent = '📊 Stats ▾';
+  document.getElementById('statsContent').innerHTML = '<div class="stats-loading">Loading stats…</div>';
+}
+
+async function toggleStats() {
+  const panel  = document.getElementById('statsPanel');
+  const btn    = document.getElementById('statsBtn');
+  const isOpen = panel.style.display !== 'none';
+
+  if (isOpen) { closeStats(); return; }
+  if (!activeCoin) return;
+
+  panel.style.display = 'block';
+  btn.classList.add('open');
+  btn.textContent = '📊 Stats ▴';
+
+  if (!apiKey) {
+    document.getElementById('statsContent').innerHTML =
+      '<div class="stats-loading" style="color:var(--red)">API key required to load stats.</div>';
+    return;
+  }
+
+  try {
+    const res  = await fetch(
+      `https://api.coinranking.com/v2/coin/${activeCoin.uuid}?referenceCurrencyUuid=${curUuid()}`,
+      { headers: { 'x-access-token': apiKey } }
+    );
+    const json = await res.json();
+    if (json.status !== 'success') throw new Error(json.message || 'API error');
+    renderStats(json.data.coin);
+  } catch(e) {
+    document.getElementById('statsContent').innerHTML =
+      `<div class="stats-loading" style="color:var(--red)">Failed to load stats: ${esc(e.message)}</div>`;
+  }
+}
+
+function fmtBig(n) {
+  if (n == null || isNaN(n)) return '—';
+  n = parseFloat(n);
+  if (n >= 1e12) return (n / 1e12).toFixed(2) + 'T';
+  if (n >= 1e9)  return (n / 1e9).toFixed(2)  + 'B';
+  if (n >= 1e6)  return (n / 1e6).toFixed(2)  + 'M';
+  if (n >= 1e3)  return (n / 1e3).toFixed(2)  + 'K';
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
+function renderStats(c) {
+  const sym     = activeCurrency.symbol;
+  const athDate = c.allTimeHigh?.timestamp
+    ? new Date(c.allTimeHigh.timestamp * 1000).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
+    : '—';
+
+  const rows = [
+    { label: 'Rank',          value: c.rank ? '#' + c.rank : '—' },
+    { label: 'Market Cap',    value: c.marketCap     ? sym + fmtBig(c.marketCap)     : '—' },
+    { label: 'Volume 24h',    value: c['24hVolume']  ? sym + fmtBig(c['24hVolume'])  : '—' },
+    { label: 'Circ. Supply',  value: c.supply?.circulating
+        ? fmtBig(c.supply.circulating) + ' ' + esc(c.symbol) : '—' },
+    { label: 'Max Supply',    value: c.supply?.max
+        ? fmtBig(c.supply.max) + ' ' + esc(c.symbol) : '∞' },
+    { label: 'All Time High', value: c.allTimeHigh?.price
+        ? sym + fmtBig(c.allTimeHigh.price) : '—',
+      sub: athDate, full: true },
+  ];
+
+  document.getElementById('statsContent').innerHTML = `
+    <div class="stats-grid">
+      ${rows.map(r => `
+        <div class="stats-row${r.full ? ' full-width' : ''}">
+          <div class="stats-label">${r.label}</div>
+          <div class="stats-value">${r.value}</div>
+          ${r.sub ? `<div class="stats-sub">${r.sub}</div>` : ''}
+        </div>`
+      ).join('')}
+    </div>`;
 }
 
 function debSearch() {
@@ -1351,6 +1484,7 @@ function pickCoin(c) {
   localStorage.setItem(CK, JSON.stringify(coinCache));
   document.getElementById('coinSearchIn').value = c.name;
   document.getElementById('searchDrop').style.display = 'none';
+  closeStats(); // reset stats panel for new coin
   showPreview(c);
 }
 
@@ -1359,6 +1493,7 @@ function showPreview(c) {
   document.getElementById('previewIco').innerHTML = icoHtml(c, 30);
   document.getElementById('previewNm').textContent  = c.name;
   document.getElementById('previewSy').textContent  = c.symbol;
+  document.getElementById('statsBtn').style.display = 'inline-flex';
 }
 
 function saveHolding() {

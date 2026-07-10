@@ -218,6 +218,42 @@
       .ssub   { font-size: 0.6rem; margin-top: 1px; }
     }
 
+    /* CHARTS */
+    .charts-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-bottom: 20px; }
+    @media (max-width: 820px) { .charts-grid { grid-template-columns: 1fr; } }
+    .chart-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      padding: 14px 16px; min-width: 0;
+    }
+    .chart-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .range-tabs { display: flex; gap: 4px; }
+    .range-tab {
+      font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.5px;
+      background: transparent; border: 1px solid var(--border); color: var(--muted);
+      padding: 4px 8px; border-radius: 6px; transition: all 0.13s;
+    }
+    .range-tab:hover { color: var(--text); border-color: var(--muted); }
+    .range-tab.active { background: var(--accent); border-color: var(--accent); color: #000; }
+    .hist-chart { position: relative; height: 170px; }
+    .hist-chart svg { display: block; width: 100%; height: 100%; }
+    .chart-empty {
+      height: 100%; min-height: 120px; display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); text-align: center; line-height: 1.8;
+    }
+    .hist-tip {
+      position: absolute; pointer-events: none; display: none; z-index: 5;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 6px 9px; font-family: var(--font-mono); font-size: 0.64rem; line-height: 1.6;
+      white-space: nowrap; transform: translate(-50%, -110%);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+    .donut-wrap { display: flex; align-items: center; gap: 16px; min-height: 150px; }
+    .donut-legend { flex: 1; display: flex; flex-direction: column; gap: 5px; overflow: hidden; max-height: 160px; overflow-y: auto; }
+    .dleg-row { display: flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 0.66rem; }
+    .dleg-chip { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+    .dleg-sym { font-weight: 700; }
+    .dleg-pct { margin-left: auto; color: var(--muted); }
+
     /* TABLE */
     .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 10px; flex-wrap: wrap; }
     .section-title { font-size: 1rem; font-weight: 700; }
@@ -610,6 +646,26 @@
       <div class="slabel">24h Change</div>
       <div class="svalue" id="sDay">—</div>
       <div class="ssub"   id="sDayPct">—</div>
+    </div>
+  </div>
+
+  <!-- CHARTS -->
+  <div class="charts-grid" id="chartsGrid">
+    <div class="chart-card">
+      <div class="chart-head">
+        <span class="slabel">Portfolio History</span>
+        <div class="range-tabs" id="rangeTabs">
+          <button class="range-tab" data-r="24h" onclick="setHistRange('24h')">24H</button>
+          <button class="range-tab active" data-r="7d" onclick="setHistRange('7d')">7D</button>
+          <button class="range-tab" data-r="30d" onclick="setHistRange('30d')">30D</button>
+          <button class="range-tab" data-r="all" onclick="setHistRange('all')">ALL</button>
+        </div>
+      </div>
+      <div id="histChart" class="hist-chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-head"><span class="slabel">Allocation</span></div>
+      <div id="donutWrap" class="donut-wrap"></div>
     </div>
   </div>
 
@@ -1711,6 +1767,8 @@ async function refreshPrices() {
     if (c.volume24h) updateVolHistory(c.uuid, c.volume24h);
   });
 
+  recordValueHistory();
+
   document.getElementById('lastUp').textContent =
     'Updated ' + new Date().toLocaleTimeString() + ' · ' + activeCurrency.code;
   renderAll();
@@ -2573,7 +2631,179 @@ async function restoreAllPortfolios() {
 //  RENDER
 // ════════════════════════════════════════════════════════════════════
 
-function renderAll() { renderTicker(); renderSummary(); renderTable(); }
+function renderAll() { renderTicker(); renderSummary(); renderTable(); renderCharts(); }
+
+// ════════════════════════════════════════════════════════════════════
+//  CHARTS — value history + allocation donut (inline SVG)
+// ════════════════════════════════════════════════════════════════════
+const HIST_KEY     = 'ch_valhistory_v1';   // { portId: [ {t, v} ] }
+const HIST_MIN_GAP = 15 * 60 * 1000;       // one point per 15 min
+const HIST_MAX     = 2000;                 // points kept per portfolio
+
+let histRange = '7d';
+
+function loadHist() {
+  try { return JSON.parse(localStorage.getItem(HIST_KEY) || '{}'); } catch { return {}; }
+}
+
+// Called after each successful price refresh. Values are in the active
+// display currency; switching currency changes the basis going forward.
+function recordValueHistory() {
+  let tot = 0, have = false;
+  holdings.forEach(h => {
+    const c = coinCache[h.uuid];
+    if (c?.price) { tot += c.price * h.amount; have = true; }
+  });
+  if (!have) return;
+  const all  = loadHist();
+  const arr  = all[activePortId] || [];
+  const last = arr[arr.length - 1];
+  if (last && Date.now() - last.t < HIST_MIN_GAP) {
+    last.v = +tot.toFixed(2);              // keep the tail fresh within the window
+  } else {
+    arr.push({ t: Date.now(), v: +tot.toFixed(2) });
+    while (arr.length > HIST_MAX) arr.shift();
+  }
+  all[activePortId] = arr;
+  try { localStorage.setItem(HIST_KEY, JSON.stringify(all)); } catch(_) {}
+}
+
+function setHistRange(r) {
+  histRange = r;
+  document.querySelectorAll('.range-tab').forEach(b => b.classList.toggle('active', b.dataset.r === r));
+  renderHistory();
+}
+
+function renderCharts() { renderHistory(); renderDonut(); }
+
+function renderHistory() {
+  const el = document.getElementById('histChart');
+  if (!el) return;
+  const days   = { '24h': 1, '7d': 7, '30d': 30, 'all': Infinity }[histRange] || 7;
+  const cutoff = days === Infinity ? 0 : Date.now() - days * ONE_DAY_MS;
+  const pts    = (loadHist()[activePortId] || []).filter(p => p.t >= cutoff);
+
+  if (pts.length < 2) {
+    el.innerHTML = `<div class="chart-empty">Not enough history for this range yet.<br>A value point is saved every 15 minutes while the app is open.</div>`;
+    return;
+  }
+
+  const W = 600, H = 170, PT = 8, PB = 18, PL = 4, PR = 4;
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  let vMin = Math.min(...pts.map(p => p.v)), vMax = Math.max(...pts.map(p => p.v));
+  if (vMin === vMax) { vMin *= 0.99; vMax *= 1.01; }
+  const X = t => PL + (t - t0) / (t1 - t0 || 1) * (W - PL - PR);
+  const Y = v => PT + (1 - (v - vMin) / (vMax - vMin)) * (H - PT - PB);
+
+  const line = pts.map(p => `${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join(' ');
+  const up   = pts[pts.length - 1].v >= pts[0].v;
+  const col  = up ? 'var(--green)' : 'var(--red)';
+  const sym  = activeCurrency.symbol;
+
+  el.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="histFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${up ? 'rgba(0,212,170,0.28)' : 'rgba(255,77,106,0.28)'}"/>
+          <stop offset="100%" stop-color="rgba(0,0,0,0)"/>
+        </linearGradient>
+      </defs>
+      <polygon points="${X(t0).toFixed(1)},${H - PB} ${line} ${X(t1).toFixed(1)},${H - PB}" fill="url(#histFill)"/>
+      <polyline points="${line}" fill="none" stroke="${col}" stroke-width="1.8"
+                stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+      <line id="histCross" x1="0" x2="0" y1="${PT}" y2="${H - PB}" stroke="var(--muted)"
+            stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke" style="display:none"/>
+    </svg>
+    <div style="position:absolute;left:6px;top:2px;font-family:var(--font-mono);font-size:0.58rem;color:var(--muted)">
+      high ${sym}${fmtU(vMax)}</div>
+    <div style="position:absolute;left:6px;bottom:0;font-family:var(--font-mono);font-size:0.58rem;color:var(--muted)">
+      low ${sym}${fmtU(vMin)}</div>
+    <div class="hist-tip" id="histTip"></div>`;
+
+  // Hover crosshair + tooltip
+  const svg   = el.querySelector('svg');
+  const cross = el.querySelector('#histCross');
+  const tip   = el.querySelector('#histTip');
+  svg.onmousemove = e => {
+    const rect = svg.getBoundingClientRect();
+    const tAt  = t0 + (e.clientX - rect.left) / rect.width * (t1 - t0);
+    let best = pts[0];
+    for (const p of pts) if (Math.abs(p.t - tAt) < Math.abs(best.t - tAt)) best = p;
+    const px = X(best.t);
+    cross.setAttribute('x1', px); cross.setAttribute('x2', px);
+    cross.style.display = 'block';
+    tip.style.display = 'block';
+    tip.style.left = (px / W * rect.width) + 'px';
+    tip.style.top  = (Y(best.v) / H * rect.height) + 'px';
+    tip.innerHTML  = `<b>${sym}${fmtU(best.v)}</b><br>${new Date(best.t).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}`;
+  };
+  svg.onmouseleave = () => { cross.style.display = 'none'; tip.style.display = 'none'; };
+}
+
+const DONUT_PALETTE = ['#f0b429','#00d4aa','#ff4d6a','#6c8cff','#c86cff','#ff9f43','#4dd4ff','#a3e048','#ff6cab','#8892a6'];
+
+function renderDonut() {
+  const el = document.getElementById('donutWrap');
+  if (!el) return;
+
+  // Aggregate value per coin
+  const byCoin = {};
+  holdings.forEach(h => {
+    const c = coinCache[h.uuid];
+    if (!c?.price) return;
+    byCoin[h.uuid] = (byCoin[h.uuid] || 0) + c.price * h.amount;
+  });
+  const total = Object.values(byCoin).reduce((a, b) => a + b, 0);
+  if (!total) {
+    el.innerHTML = '<div class="chart-empty" style="width:100%">Add holdings to see your allocation.</div>';
+    return;
+  }
+
+  let segs = Object.entries(byCoin)
+    .map(([uuid, v]) => ({ uuid, v, c: coinCache[uuid] }))
+    .sort((a, b) => b.v - a.v);
+  if (segs.length > 8) {
+    const rest = segs.slice(7);
+    segs = segs.slice(0, 7);
+    segs.push({ uuid: '__other__', v: rest.reduce((a, s) => a + s.v, 0), c: { symbol: 'Other', name: 'Other', color: '#8892a6' } });
+  }
+  const used = new Set();
+  segs.forEach((s, i) => {
+    let col = s.c?.color;
+    if (!col || used.has(col)) col = DONUT_PALETTE[i % DONUT_PALETTE.length];
+    used.add(col);
+    s.color = col;
+    s.pct   = s.v / total * 100;
+  });
+
+  const R = 52, C = 2 * Math.PI * R;
+  let off = 0;
+  const circles = segs.map(s => {
+    const len = Math.max(s.pct / 100 * C - 1.5, 0.5); // small gap between segments
+    const html = `<circle cx="75" cy="75" r="${R}" fill="none" stroke="${s.color}" stroke-width="22"
+      stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"
+      transform="rotate(-90 75 75)"><title>${esc(s.c?.name || '')} ${s.pct.toFixed(1)}%</title></circle>`;
+    off += s.pct / 100 * C;
+    return html;
+  }).join('');
+
+  el.innerHTML = `
+    <svg viewBox="0 0 150 150" width="140" height="140" style="flex-shrink:0">
+      ${circles}
+      <text x="75" y="71" text-anchor="middle" fill="var(--text)"
+        style="font-family:var(--font-display);font-size:15px;font-weight:800">${esc(activeCurrency.symbol)}${fmtBig(total)}</text>
+      <text x="75" y="86" text-anchor="middle" fill="var(--muted)"
+        style="font-family:var(--font-mono);font-size:8px;letter-spacing:1px">${segs.length} ASSET${segs.length !== 1 ? 'S' : ''}</text>
+    </svg>
+    <div class="donut-legend">
+      ${segs.map(s => `
+        <div class="dleg-row">
+          <span class="dleg-chip" style="background:${s.color}"></span>
+          <span class="dleg-sym">${esc(s.c?.symbol || '?')}</span>
+          <span class="dleg-pct">${s.pct.toFixed(1)}%</span>
+        </div>`).join('')}
+    </div>`;
+}
 
 // ── Ticker rAF scroller ──
 let tickerX       = 0;

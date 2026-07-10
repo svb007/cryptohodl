@@ -450,6 +450,29 @@
     }
     .cur-loading { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); padding: 0 4px; }
 
+    /* DATA SAFETY */
+    .safety-banner {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 10px 28px; position: relative; z-index: 1;
+      background: rgba(240,180,41,0.08); border-bottom: 1px solid rgba(240,180,41,0.25);
+      font-size: 0.8rem; color: var(--text);
+    }
+    .safety-banner .bmsg { flex: 1; min-width: 200px; line-height: 1.5; }
+    .safety-banner button { flex-shrink: 0; padding: 7px 14px; font-size: 0.78rem; }
+    @media (max-width: 768px) { .safety-banner { padding: 10px 14px; } }
+    .safety-card {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 14px; margin-bottom: 14px;
+    }
+    .safety-status { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 0.72rem; margin-bottom: 10px; }
+    .snap-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+    .snap-row {
+      display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    }
+    .snap-when { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; }
+    .snap-meta { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); margin-top: 2px; }
+
     footer {
       text-align: center; padding: 20px; font-family: var(--font-mono); font-size: 0.67rem;
       color: var(--muted); border-top: 1px solid var(--border); position: relative; z-index: 1;
@@ -531,6 +554,9 @@
     <button class="mob-menu-item" onclick="exportCSV();closeMobMenu()">⬇ Export CSV</button>
   </div>
 </div>
+
+<!-- Backup / permission nudge banner (populated by renderBackupBanner) -->
+<div id="safetyBanner"></div>
 
 <!-- MAIN -->
 <main>
@@ -706,7 +732,8 @@
     <div style="display:flex;gap:6px;margin-bottom:18px">
       <button class="sync-tab active" id="stab-backup"  onclick="syncTab('backup')">📤 Backup</button>
       <button class="sync-tab"        id="stab-restore" onclick="syncTab('restore')">📥 Restore</button>
-      <button class="sync-tab"        id="stab-qr"      onclick="syncTab('qr')">📱 QR Code</button>
+      <button class="sync-tab"        id="stab-qr"      onclick="syncTab('qr')">📱 QR</button>
+      <button class="sync-tab"        id="stab-safety"  onclick="syncTab('safety')">🛡 Safety</button>
     </div>
 
     <!-- Backup panel -->
@@ -779,6 +806,29 @@
         </div>
         <div id="qrScanStatus" style="font-family:var(--font-mono);font-size:0.72rem;color:var(--muted);margin-top:8px;text-align:center"></div>
       </div>
+    </div>
+
+    <!-- Safety panel -->
+    <div id="spanel-safety" style="display:none">
+      <!-- Auto-backup to file -->
+      <div class="safety-card" id="autoBackupCard">
+        <div class="safety-status"><span class="dot" id="abDot"></span><span id="abStatus">Auto-backup: off</span></div>
+        <p style="font-size:0.76rem;color:var(--muted);line-height:1.6;margin-bottom:10px" id="abInfo">
+          Pick a file once (e.g. in a synced folder like Google Drive or Dropbox) and CryptoHodl
+          will silently rewrite it after every change — your data survives even if browser data is cleared.
+        </p>
+        <div style="display:flex;gap:8px">
+          <button class="btn-primary" id="abConnectBtn" style="flex:1" onclick="connectAutoBackup()">Choose Backup File</button>
+          <button class="btn-ghost" id="abDisconnectBtn" style="display:none;color:var(--red);border-color:var(--red)" onclick="disconnectAutoBackup()">Disconnect</button>
+        </div>
+      </div>
+
+      <!-- Snapshots -->
+      <div class="fg" style="margin-bottom:10px">
+        <label>Local Snapshots — auto-saved on every change</label>
+        <div id="snapList" class="snap-list"></div>
+      </div>
+      <div id="persistStatus" style="font-family:var(--font-mono);font-size:0.62rem;color:var(--muted)"></div>
     </div>
 
     <div class="mactions" style="margin-top:16px">
@@ -882,6 +932,12 @@ function loadPortfolios() {
 
 function savePortfolios() {
   localStorage.setItem(PORTS_KEY, JSON.stringify(portfolios));
+  // Detect real data changes (holdings/names/currency — not coinCache churn)
+  const fp = JSON.stringify(cleanPortfolios());
+  if (fp !== lastCleanFp) {
+    if (lastCleanFp !== null) dataChanged();
+    lastCleanFp = fp;
+  }
 }
 
 function persistActive() {
@@ -889,6 +945,293 @@ function persistActive() {
   portfolios[activePortId].coinCache = coinCache;
   portfolios[activePortId].currency  = activeCurrency;
   savePortfolios();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  DATA SAFETY — snapshots, auto-backup file, persistence
+// ════════════════════════════════════════════════════════════════════
+const SNAP_KEY  = 'ch_snapshots_v1';    // [ { t, reason, portfolios } ] newest first
+const BMETA_KEY = 'ch_backup_meta_v1';  // { lastBackupAt, lastChangeAt, dismissedAt }
+const SNAP_KEEP_RECENT = 10;            // newest change-snapshots always kept
+const SNAP_KEEP_DAYS   = 7;             // plus one per day this far back
+
+let lastCleanFp = null;
+let bmeta = (() => { try { return JSON.parse(localStorage.getItem(BMETA_KEY) || '{}'); } catch { return {}; } })();
+function saveBmeta() { localStorage.setItem(BMETA_KEY, JSON.stringify(bmeta)); }
+
+// Portfolios without coinCache — the payload worth protecting
+function cleanPortfolios() {
+  const clean = {};
+  Object.entries(portfolios).forEach(([id, p]) => {
+    clean[id] = { name: p.name, holdings: p.holdings || [], currency: p.currency };
+  });
+  return clean;
+}
+
+function loadSnapshots() {
+  try { return JSON.parse(localStorage.getItem(SNAP_KEY) || '[]'); } catch { return []; }
+}
+
+function takeSnapshot(reason) {
+  const data = cleanPortfolios();
+  if (!Object.keys(data).length) return;
+  let snaps = loadSnapshots();
+  if (snaps.length && JSON.stringify(snaps[0].portfolios) === JSON.stringify(data)) return; // unchanged
+  // Guarantee strictly increasing timestamps — restore looks snapshots up by t
+  const t = Math.max(Date.now(), (snaps[0]?.t || 0) + 1);
+  snaps.unshift({ t, reason, portfolios: data });
+
+  // Prune: keep the newest N, then at most one per day within the window
+  const keep     = snaps.slice(0, SNAP_KEEP_RECENT);
+  const seenDays = new Set(keep.map(s => new Date(s.t).toDateString()));
+  const cutoff   = Date.now() - SNAP_KEEP_DAYS * ONE_DAY_MS;
+  snaps.slice(SNAP_KEEP_RECENT).forEach(s => {
+    const day = new Date(s.t).toDateString();
+    if (s.t >= cutoff && !seenDays.has(day)) { keep.push(s); seenDays.add(day); }
+  });
+  try { localStorage.setItem(SNAP_KEY, JSON.stringify(keep)); }
+  catch(e) { console.warn('Snapshot save failed:', e); }
+}
+
+let safetyTimer = null;
+function dataChanged() {
+  bmeta.lastChangeAt = Date.now();
+  saveBmeta();
+  clearTimeout(safetyTimer);
+  safetyTimer = setTimeout(() => {
+    takeSnapshot('auto');
+    writeAutoBackup();
+    renderBackupBanner();
+  }, 2000);
+}
+
+function snapCounts(s) {
+  const ports = Object.keys(s.portfolios).length;
+  const holds = Object.values(s.portfolios).reduce((n, p) => n + (p.holdings?.length || 0), 0);
+  return `${holds} holding${holds !== 1 ? 's' : ''} · ${ports} portfolio${ports !== 1 ? 's' : ''}`;
+}
+
+function restoreSnapshot(t) {
+  const s = loadSnapshots().find(x => x.t === t);
+  if (!s || !Object.keys(s.portfolios).length) return;
+  if (!confirm(`Restore snapshot from ${new Date(s.t).toLocaleString()}?\n(${snapCounts(s)})\n\nYour current data is snapshotted first, so this is undoable.`)) return;
+  takeSnapshot('before snapshot restore');
+  portfolios = {};
+  Object.entries(s.portfolios).forEach(([id, p]) => {
+    portfolios[id] = {
+      name: p.name, holdings: p.holdings || [], coinCache: {},
+      currency: p.currency || { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' },
+    };
+  });
+  if (!portfolios[activePortId]) activePortId = Object.keys(portfolios)[0];
+  localStorage.setItem(ACTIVE_KEY, activePortId);
+  holdings       = portfolios[activePortId].holdings;
+  coinCache      = portfolios[activePortId].coinCache;
+  activeCurrency = portfolios[activePortId].currency;
+  savePortfolios();
+  renderPortSelect(); syncCurrencySelect(); renderAll();
+  if (apiKey) refreshPrices();
+  renderSafetyPanel();
+}
+
+// ── Auto-backup to a real file (File System Access API, Chromium) ──
+const fsaSupported   = 'showSaveFilePicker' in window;
+let backupHandle     = null;
+let autoBackupState  = 'off'; // off | active | needs-permission | error
+
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open('cryptohodl', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('kv');
+    req.onsuccess = () => res(req.result);
+    req.onerror   = () => rej(req.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const rq = db.transaction('kv').objectStore('kv').get(key);
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+  });
+}
+async function idbSet(key, val) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('kv', 'readwrite');
+    tx.objectStore('kv').put(val, key);
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbDel(key) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('kv', 'readwrite');
+    tx.objectStore('kv').delete(key);
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+}
+
+function fullBackupJSON() {
+  return JSON.stringify({
+    version: 1, exportedAt: new Date().toISOString(),
+    activePortId, portfolios: cleanPortfolios(),
+  }, null, 2);
+}
+
+async function connectAutoBackup() {
+  if (!fsaSupported) return;
+  try {
+    backupHandle = await showSaveFilePicker({
+      suggestedName: 'cryptohodl-autobackup.json',
+      types: [{ description: 'JSON backup', accept: { 'application/json': ['.json'] } }],
+    });
+    await idbSet('backupHandle', backupHandle);
+    await writeAutoBackup(true);
+  } catch(e) { /* user cancelled the picker */ }
+  renderSafetyPanel();
+}
+
+async function disconnectAutoBackup() {
+  backupHandle    = null;
+  autoBackupState = 'off';
+  try { await idbDel('backupHandle'); } catch(_) {}
+  renderSafetyPanel(); renderBackupBanner();
+}
+
+async function writeAutoBackup(force) {
+  if (!backupHandle) return;
+  try {
+    const perm = await backupHandle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') {
+      if (!force) { autoBackupState = 'needs-permission'; renderBackupBanner(); return; }
+      if (await backupHandle.requestPermission({ mode: 'readwrite' }) !== 'granted') {
+        autoBackupState = 'needs-permission'; renderBackupBanner(); return;
+      }
+    }
+    const w = await backupHandle.createWritable();
+    await w.write(fullBackupJSON());
+    await w.close();
+    autoBackupState  = 'active';
+    bmeta.lastBackupAt = Date.now();
+    saveBmeta();
+    renderBackupBanner();
+  } catch(e) {
+    console.warn('Auto-backup write failed:', e);
+    autoBackupState = 'error';
+  }
+}
+
+// Needs a user gesture (called from the banner button)
+async function reenableAutoBackup() {
+  await writeAutoBackup(true);
+  renderSafetyPanel();
+}
+
+async function initAutoBackup() {
+  if (!fsaSupported) return;
+  try {
+    backupHandle = await idbGet('backupHandle') || null;
+    if (!backupHandle) return;
+    const perm = await backupHandle.queryPermission({ mode: 'readwrite' });
+    autoBackupState = perm === 'granted' ? 'active' : 'needs-permission';
+  } catch(e) { backupHandle = null; }
+  renderBackupBanner();
+}
+
+// ── Safety panel UI ──
+function renderSafetyPanel() {
+  // Auto-backup card
+  const card = document.getElementById('autoBackupCard');
+  if (card) {
+    const dot   = document.getElementById('abDot');
+    const stat  = document.getElementById('abStatus');
+    const info  = document.getElementById('abInfo');
+    const conn  = document.getElementById('abConnectBtn');
+    const disc  = document.getElementById('abDisconnectBtn');
+    if (!fsaSupported) {
+      dot.className    = 'dot';
+      stat.textContent = 'Auto-backup: not supported in this browser';
+      info.textContent = 'Your browser doesn’t support silent file writing (Chrome, Edge and Brave do). Use snapshots below plus regular Download Backup File instead.';
+      conn.style.display = 'none'; disc.style.display = 'none';
+    } else if (autoBackupState === 'active' && backupHandle) {
+      dot.className    = 'dot on';
+      stat.textContent = 'Auto-backup: active → ' + (backupHandle.name || 'file');
+      conn.textContent = 'Change Backup File';
+      disc.style.display = 'block';
+    } else if (autoBackupState === 'needs-permission') {
+      dot.className    = 'dot';
+      stat.textContent = 'Auto-backup: paused — permission needed';
+      conn.textContent = 'Re-enable Auto-Backup';
+      conn.onclick     = reenableAutoBackup;
+      disc.style.display = 'block';
+    } else {
+      dot.className    = 'dot';
+      stat.textContent = 'Auto-backup: off';
+      conn.textContent = 'Choose Backup File';
+      conn.onclick     = connectAutoBackup;
+      disc.style.display = 'none';
+    }
+  }
+
+  // Snapshot list
+  const list = document.getElementById('snapList');
+  if (list) {
+    const snaps = loadSnapshots();
+    list.innerHTML = snaps.length ? snaps.map(s => `
+      <div class="snap-row">
+        <div style="flex:1">
+          <div class="snap-when">${new Date(s.t).toLocaleString()}</div>
+          <div class="snap-meta">${snapCounts(s)} · ${esc(s.reason || 'auto')}</div>
+        </div>
+        <button class="btn-ghost" style="padding:6px 12px;font-size:0.72rem" onclick="restoreSnapshot(${s.t})">Restore</button>
+      </div>`).join('')
+      : '<div style="font-family:var(--font-mono);font-size:0.7rem;color:var(--muted);padding:8px 2px">No snapshots yet — one is saved automatically each time your data changes.</div>';
+  }
+
+  // Persistent-storage status
+  const ps = document.getElementById('persistStatus');
+  if (ps && navigator.storage?.persisted) {
+    navigator.storage.persisted().then(p => {
+      ps.textContent = p
+        ? '✓ Persistent storage granted — the browser won’t auto-evict this site’s data.'
+        : '△ Persistent storage not granted — the browser could evict data under storage pressure. Installing as an app (PWA) usually grants it.';
+    });
+  }
+}
+
+// ── Backup-freshness banner ──
+function renderBackupBanner() {
+  const el = document.getElementById('safetyBanner');
+  if (!el) return;
+  const hasData = Object.values(portfolios).some(p => (p.holdings || []).length);
+  let html = '';
+
+  if (autoBackupState === 'needs-permission' && backupHandle) {
+    html = `<div class="safety-banner">
+      <div class="bmsg">🛡 <b>Auto-backup is paused</b> — the browser needs you to re-grant file access.</div>
+      <button class="btn-primary" onclick="reenableAutoBackup()">Re-enable</button>
+      <button class="btn-ghost" onclick="disconnectAutoBackup()">Turn off</button>
+    </div>`;
+  } else if (hasData && autoBackupState !== 'active') {
+    const last      = bmeta.lastBackupAt || 0;
+    const changed   = (bmeta.lastChangeAt || 0) > last;
+    const staleDays = last ? Math.floor((Date.now() - last) / ONE_DAY_MS) : Infinity;
+    const dismissed = (Date.now() - (bmeta.dismissedAt || 0)) < 7 * ONE_DAY_MS;
+    if (changed && staleDays >= 7 && !dismissed) {
+      html = `<div class="safety-banner">
+        <div class="bmsg">🛡 ${last ? `Your data changed but hasn’t been backed up in <b>${staleDays} days</b>.` : '<b>Your data has never been backed up.</b>'} Losing this browser’s storage would lose your portfolios.</div>
+        <button class="btn-primary" onclick="openSync();syncTab('safety')">Back up now</button>
+        <button class="btn-ghost" onclick="dismissBackupNudge()">Dismiss</button>
+      </div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function dismissBackupNudge() {
+  bmeta.dismissedAt = Date.now();
+  saveBmeta();
+  renderBackupBanner();
 }
 
 // ── State ────────────────────────────────────────────────────────────
@@ -1060,7 +1403,8 @@ function renamePortfolio(id) {
 
 function deletePortfolio(id) {
   if (Object.keys(portfolios).length <= 1) { alert('Cannot delete the last portfolio.'); return; }
-  if (!confirm(`Delete "${portfolios[id].name}"? This cannot be undone.`)) return;
+  if (!confirm(`Delete "${portfolios[id].name}"? A snapshot is saved first (Sync → Safety), so you can restore it.`)) return;
+  takeSnapshot('before portfolio delete');
   delete portfolios[id];
   savePortfolios();
   // If we deleted the active one, switch to first available
@@ -1710,6 +2054,7 @@ async function runImport() {
 
   const mode = document.getElementById('importMode').value;
   if (mode === 'replace') {
+    takeSnapshot('before import (replace)');
     holdings = [];
     iLog('<span style="color:var(--red)">⚠ Existing portfolio cleared.</span>');
   }
@@ -1805,10 +2150,11 @@ function openSync() {
 }
 
 function syncTab(name) {
-  ['backup','restore','qr'].forEach(t => {
+  ['backup','restore','qr','safety'].forEach(t => {
     document.getElementById('spanel-' + t).style.display = t === name ? 'block' : 'none';
     document.getElementById('stab-'   + t).classList.toggle('active', t === name);
   });
+  if (name === 'safety') renderSafetyPanel();
   // Reset QR output when switching away
   if (name !== 'qr') {
     document.getElementById('qrOutput').style.display = 'none';
@@ -1819,11 +2165,8 @@ function syncTab(name) {
 const QR_MAX = 4000; // safe limit for QR version 40 with byte encoding
 
 function buildBackupPayload(portId) {
-  const clean = {};
-  const src = portId === '__all__' ? portfolios : { [portId]: portfolios[portId] };
-  Object.entries(src).forEach(([id, p]) => {
-    clean[id] = { name: p.name, holdings: p.holdings, currency: p.currency };
-  });
+  const all   = cleanPortfolios();
+  const clean = portId === '__all__' ? all : { [portId]: all[portId] };
   const activeId = portId === '__all__' ? activePortId : portId;
   return JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), activePortId: activeId, portfolios: clean });
 }
@@ -1951,18 +2294,16 @@ function handleScannedQR(data) {
 
 
 function exportAllPortfolios() {
-  // Strip coinCache from the backup to keep file size small — prices refresh on load anyway
-  const clean = {};
-  Object.entries(portfolios).forEach(([id, p]) => {
-    clean[id] = { name: p.name, holdings: p.holdings, currency: p.currency };
-  });
-  const backup = { version: 1, exportedAt: new Date().toISOString(), activePortId, portfolios: clean };
-  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  // coinCache is stripped to keep file size small — prices refresh on load anyway
+  const blob = new Blob([fullBackupJSON()], { type: 'application/json' });
   const a = Object.assign(document.createElement('a'), {
     href: URL.createObjectURL(blob),
     download: 'cryptohodl-backup-' + new Date().toISOString().slice(0,10) + '.json',
   });
   a.click();
+  bmeta.lastBackupAt = Date.now();
+  saveBmeta();
+  renderBackupBanner();
 }
 
 function restoreAllPortfolios() {
@@ -1982,7 +2323,8 @@ function restoreAllPortfolios() {
   const incoming = backup.portfolios;
 
   if (mode === 'replace') {
-    if (!confirm('This will overwrite ALL your current portfolios. Are you sure?')) return;
+    if (!confirm('This will overwrite ALL your current portfolios. A snapshot is saved first (Sync → Safety). Are you sure?')) return;
+    takeSnapshot('before backup restore (replace)');
     portfolios = {};
     Object.entries(incoming).forEach(([id, p]) => {
       portfolios[id] = { name: p.name, holdings: p.holdings || [], coinCache: {}, currency: p.currency || { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' } };
@@ -2309,6 +2651,14 @@ loadCurrencies();      // always runs — uses fallback if no API key
 syncCurrencySelect();  // set dropdown to match active portfolio's currency
 if (apiKey) refreshPrices();
 setInterval(refreshPrices, 60000);
+
+// ── Data safety boot ──
+if (lastCleanFp === null) lastCleanFp = JSON.stringify(cleanPortfolios());
+if (!loadSnapshots().length) takeSnapshot('initial'); // protect existing users immediately
+if (navigator.storage?.persist) {
+  navigator.storage.persisted().then(p => { if (!p) navigator.storage.persist().catch(() => {}); });
+}
+initAutoBackup().then(renderBackupBanner);
 </script>
 </body>
 </html>

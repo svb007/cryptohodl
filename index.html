@@ -1286,7 +1286,8 @@ function populateSelectWith(list) {
         if (activeCurrency.uuid !== c.uuid) {
           activeCurrency.uuid   = c.uuid;
           activeCurrency.symbol = opt.dataset.symbol;
-          localStorage.setItem(CUR_KEY, JSON.stringify(activeCurrency));
+          portfolios[activePortId].currency = activeCurrency;
+          savePortfolios();
         }
       }
       return opt;
@@ -1607,7 +1608,7 @@ async function doSearch() {
 function pickCoin(c) {
   activeCoin = c;
   coinCache[c.uuid] = { ...c, at: Date.now() };
-  localStorage.setItem(CK, JSON.stringify(coinCache));
+  persistActive();
   document.getElementById('coinSearchIn').value = c.name;
   document.getElementById('searchDrop').style.display = 'none';
   closeStats(); // reset stats panel for new coin
@@ -2077,16 +2078,13 @@ function renderTicker() {
   const fingerprint = coins.map(c => c.uuid).sort().join(',');
 
   if (el.dataset.fingerprint === fingerprint && el.children.length > 0) {
-    // Same coins — update values in-place, animation keeps running uninterrupted
-    const items = el.querySelectorAll('.ticker-item');
-    const half  = Math.floor(items.length / 2);
-    coins.forEach((c, i) => {
+    // Same coins — update values in-place (keyed by uuid), animation keeps running
+    coins.forEach(c => {
       const chg    = c.change24h || 0;
       const cls    = chg >= 0 ? 'pos' : 'neg';
       const val    = `${sym}${fmtP(c.price)}`;
       const chgTxt = `${chg >= 0 ? '▲' : '▼'}${Math.abs(chg).toFixed(2)}%`;
-      [items[i], items[i + half]].forEach(item => {
-        if (!item) return;
+      el.querySelectorAll(`.ticker-item[data-uuid="${c.uuid}"]`).forEach(item => {
         item.querySelector('.ticker-price').textContent = val;
         const chgEl = item.querySelector('.ticker-chg');
         chgEl.textContent = chgTxt;
@@ -2100,7 +2098,7 @@ function renderTicker() {
   const makeItem = c => {
     const chg = c.change24h || 0;
     const cls = chg >= 0 ? 'pos' : 'neg';
-    return `<span class="ticker-item">
+    return `<span class="ticker-item" data-uuid="${esc(c.uuid)}">
       ${c.iconUrl ? `<img class="ticker-icon" src="${c.iconUrl}" alt="">` : ''}
       <span class="ticker-sym">${esc(c.symbol)}</span>
       <span class="ticker-price" style="color:var(--muted)">${sym}${fmtP(c.price)}</span>

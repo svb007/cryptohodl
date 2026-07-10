@@ -295,7 +295,7 @@
     .th-sort:hover { color: var(--text); }
     .sort-arrow { display: inline-block; width: 12px; color: var(--accent); }
     @media (max-width: 640px) { .col-trend { display: none; } }
-    .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+    .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; }
     thead th {
       font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 1.5px; text-transform: uppercase;
@@ -310,19 +310,29 @@
 
     @media (max-width: 768px) {
       .table-wrap { border-radius: 12px; }
-      table { width: 100%; }
-      thead th { padding: 10px 10px; font-size: 0.55rem; }
-      td { padding: 10px 10px; }
+      /* Fixed layout so columns share the viewport instead of overflowing it;
+         the asset cell ellipsizes rather than pushing P&L off-screen */
+      table { width: 100%; table-layout: fixed; }
+      thead th:first-child { width: 41%; }
+      thead th { padding: 10px 8px; font-size: 0.55rem; letter-spacing: 1px; }
+      td { padding: 10px 8px; }
+      .coin-info { gap: 8px; }
+      .coin-info > div:last-child { min-width: 0; }
       .cicon { width: 28px; height: 28px; flex-shrink: 0; }
       .cicon img { width: 17px; height: 17px; }
-      .cname { font-size: 0.78rem; }
+      .cname { font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .csym  { font-size: 0.58rem; }
       .cdesc { font-size: 0.55rem; }
       .abar  { width: 36px; }
       .apct  { font-size: 0.6rem; width: 26px; }
       .cbadge { font-size: 0.6rem; padding: 2px 5px; }
+      .val-main { font-size: 0.68rem; }
       .mob-pl-val { font-size: 0.65rem !important; }
       .mob-pl-pct { font-size: 0.58rem !important; }
+    }
+    @media (max-width: 400px) {
+      .val-main { font-size: 0.62rem; }
+      .mob-pl-val { font-size: 0.6rem !important; }
     }
 
     .coin-info { display: flex; align-items: center; gap: 11px; }
@@ -336,6 +346,7 @@
     .cdesc { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); margin-top: 2px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     .price-val { font-family: var(--font-mono); font-size: 0.87rem; font-weight: 700; }
+    .val-main  { font-family: var(--font-mono); font-size: 0.82rem; font-weight: 700; }
     .cbadge {
       display: inline-block; font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700;
       padding: 3px 8px; border-radius: 6px;
@@ -1760,9 +1771,9 @@ function sparkSvg(prices, w = 88, h = 26) {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
   const col = prices[prices.length - 1] >= prices[0] ? 'var(--green)' : 'var(--red)';
-  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="display:block">
+  return `<svg viewBox="0 0 ${w} ${h}" style="display:block;width:100%;max-width:${w}px;height:auto">
     <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5"
-              stroke-linejoin="round" stroke-linecap="round" opacity="0.9"/>
+              stroke-linejoin="round" stroke-linecap="round" opacity="0.9" vector-effect="non-scaling-stroke"/>
   </svg>`;
 }
 
@@ -3050,7 +3061,7 @@ function renderTable() {
         </div>
       </td>
       <td style="text-align:right">
-        ${hasPx ? `<div style="font-family:var(--font-mono);font-size:0.82rem;font-weight:700">${sym}${fmtU(val)}</div>`
+        ${hasPx ? `<div class="val-main">${sym}${fmtU(val)}</div>`
                 : '<div class="skel" style="width:72px;height:13px;margin-left:auto"></div>'}
         <div style="display:flex;align-items:center;gap:5px;justify-content:flex-end;margin-top:3px">
           <div class="abar"><div class="abar-fill" style="width:${pct}%"></div></div>

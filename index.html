@@ -1356,6 +1356,7 @@ function renderSafetyPanel() {
       dot.className    = 'dot on';
       stat.textContent = 'Auto-backup: active → ' + (backupHandle.name || 'file');
       conn.textContent = 'Change Backup File';
+      conn.onclick     = connectAutoBackup;
       disc.style.display = 'block';
     } else if (autoBackupState === 'needs-permission') {
       dot.className    = 'dot';

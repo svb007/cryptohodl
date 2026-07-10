@@ -219,8 +219,18 @@
     }
 
     /* TABLE */
-    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 10px; flex-wrap: wrap; }
     .section-title { font-size: 1rem; font-weight: 700; }
+    .hold-filter {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 7px 11px; color: var(--text); font-family: var(--font-mono); font-size: 0.74rem;
+      outline: none; width: 160px; transition: border-color 0.2s, width 0.2s;
+    }
+    .hold-filter:focus { border-color: var(--accent); width: 200px; }
+    .th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+    .th-sort:hover { color: var(--text); }
+    .sort-arrow { display: inline-block; width: 12px; color: var(--accent); }
+    @media (max-width: 640px) { .col-trend { display: none; } }
     .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
     table { width: 100%; border-collapse: collapse; }
     thead th {
@@ -605,8 +615,9 @@
 
   <div class="section-header">
     <div class="section-title">Holdings</div>
-    <div style="display:flex;align-items:center;gap:14px">
-      <span style="font-family:var(--font-mono);font-size:0.63rem;color:var(--muted)">Tap row to edit</span>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <input type="search" id="holdFilter" class="hold-filter" placeholder="🔍 Filter…"
+        autocomplete="off" oninput="filterQ=this.value;renderTable()"/>
       <div style="font-family:var(--font-mono);font-size:0.71rem;color:var(--muted)" id="lastUp"></div>
     </div>
   </div>
@@ -614,7 +625,10 @@
   <div class="table-wrap">
     <table>
       <thead><tr>
-        <th>Asset</th><th>Value / Alloc</th><th>P&amp;L / 24h</th>
+        <th class="th-sort" onclick="setSort('name')">Asset<span class="sort-arrow" id="arr-name"></span></th>
+        <th class="col-trend">7d Trend</th>
+        <th class="th-sort" onclick="setSort('value')">Value / Alloc<span class="sort-arrow" id="arr-value"></span></th>
+        <th class="th-sort" onclick="setSort('pl')">P&amp;L / 24h<span class="sort-arrow" id="arr-pl"></span></th>
       </tr></thead>
       <tbody id="tBody"></tbody>
     </table>
@@ -1365,6 +1379,17 @@ let editIdx     = null;
 let activeCoin  = null;
 let searchTimer = null;
 
+// ── Table sort/filter state (session-only) ──
+let sortKey = 'value';
+let sortDir = -1;       // -1 desc, 1 asc
+let filterQ = '';
+
+function setSort(key) {
+  if (sortKey === key) sortDir = -sortDir;
+  else { sortKey = key; sortDir = key === 'name' ? 1 : -1; }
+  renderTable();
+}
+
 // ════════════════════════════════════════════════════════════════════
 //  PORTFOLIO MANAGEMENT
 // ════════════════════════════════════════════════════════════════════
@@ -1622,8 +1647,33 @@ function normCoin(c) {
     price:     parseFloat(c.price)      || 0,
     change24h: parseFloat(c.change)     || 0,
     volume24h: parseFloat(c['24hVolume']) || 0,
+    sparkline: (c.sparkline || []).filter(p => p != null).map(Number),
     at:        Date.now(),
   };
+}
+
+// 7-day % change derived from the sparkline (null if unavailable)
+function spark7d(c) {
+  const s = c?.sparkline;
+  if (!s || s.length < 2 || !s[0]) return null;
+  return (s[s.length - 1] - s[0]) / s[0] * 100;
+}
+
+// Tiny SVG polyline for a price series
+function sparkSvg(prices, w = 88, h = 26) {
+  if (!prices || prices.length < 2) return '';
+  const min = Math.min(...prices), max = Math.max(...prices);
+  const range = max - min || 1, PAD = 2;
+  const pts = prices.map((p, i) => {
+    const x = PAD + (i / (prices.length - 1)) * (w - PAD * 2);
+    const y = PAD + (1 - (p - min) / range) * (h - PAD * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const col = prices[prices.length - 1] >= prices[0] ? 'var(--green)' : 'var(--red)';
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="display:block">
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5"
+              stroke-linejoin="round" stroke-linecap="round" opacity="0.9"/>
+  </svg>`;
 }
 
 // Refresh all held coin prices — one batch call, individual fallback for misses
@@ -2652,10 +2702,47 @@ function renderTable() {
   let tot = 0;
   holdings.forEach(h => { const c = coinCache[h.uuid]; if (c) tot += c.price * h.amount; });
 
-  const sorted = holdings.map((h, i) => ({...h, _i: i}))
-    .sort((a, b) => ((coinCache[b.uuid]?.price||0)*b.amount) - ((coinCache[a.uuid]?.price||0)*a.amount));
+  // Filter
+  const q = filterQ.trim().toLowerCase();
+  let rows = holdings.map((h, i) => ({...h, _i: i}));
+  if (q) rows = rows.filter(h => {
+    const c = coinCache[h.uuid] || {};
+    return (c.name || '').toLowerCase().includes(q)
+        || (c.symbol || '').toLowerCase().includes(q)
+        || (h.description || '').toLowerCase().includes(q);
+  });
 
-  body.innerHTML = sorted.map(h => {
+  // Sort
+  const keyFns = {
+    value: h => (coinCache[h.uuid]?.price || 0) * h.amount,
+    name:  h => (coinCache[h.uuid]?.name || h.uuid).toLowerCase(),
+    pl:    h => {
+      const c = coinCache[h.uuid];
+      return (h.buyPrice && c?.price) ? c.price * h.amount - h.buyPrice : null;
+    },
+  };
+  const kf = keyFns[sortKey] || keyFns.value;
+  rows.sort((a, b) => {
+    const ka = kf(a), kb = kf(b);
+    if (ka == null && kb == null) return 0;
+    if (ka == null) return 1;               // no-P&L rows sink regardless of direction
+    if (kb == null) return -1;
+    const cmp = typeof ka === 'string' ? ka.localeCompare(kb) : ka - kb;
+    return cmp * sortDir;
+  });
+
+  // Header arrows
+  ['name','value','pl'].forEach(k => {
+    const el = document.getElementById('arr-' + k);
+    if (el) el.textContent = k === sortKey ? (sortDir === 1 ? ' ▲' : ' ▼') : '';
+  });
+
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--muted);font-family:var(--font-mono);font-size:0.75rem">No holdings match “${esc(filterQ)}”</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = rows.map(h => {
     const c   = coinCache[h.uuid] || {};
     const val = (c.price || 0) * h.amount;
     const pct = tot > 0 ? val / tot * 100 : 0;
@@ -2675,6 +2762,7 @@ function renderTable() {
                 <div class="mob-pl-pct ${plCls}" style="font-family:var(--font-mono);font-size:0.67rem">${plSign}${plPct.toFixed(2)}%</div>`;
     }
 
+    const s7 = spark7d(c);
     return `<tr style="cursor:pointer" onclick="openAdd(${h._i})" title="Click to edit">
       <td>
         <div class="coin-info">
@@ -2684,6 +2772,12 @@ function renderTable() {
             <div class="csym">${c.price ? sym + fmtP(c.price) : ''}</div>
             <div class="cdesc">${fmtA(h.amount)} ${esc(c.symbol||'')}</div>
           </div>
+        </div>
+      </td>
+      <td class="col-trend" style="text-align:right">
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+          ${sparkSvg(c.sparkline)}
+          ${s7 != null ? `<span style="font-family:var(--font-mono);font-size:0.6rem" class="${s7 >= 0 ? 'pos' : 'neg'}">${s7 >= 0 ? '+' : ''}${s7.toFixed(1)}% 7d</span>` : ''}
         </div>
       </td>
       <td style="text-align:right">

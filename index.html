@@ -16,10 +16,12 @@
     // Register a minimal service worker for PWA installability
     if ('serviceWorker' in navigator) {
       const sw = `
-        const CACHE = 'cryptohodl-v2';
+        const CACHE = 'cryptohodl-v3';
         self.addEventListener('install', e => self.skipWaiting());
         self.addEventListener('activate', e => self.clients.claim());
         self.addEventListener('fetch', e => {
+          // Never touch writes or cloud-sync traffic (must always hit the network)
+          if (e.request.method !== 'GET' || e.request.url.includes('github')) return;
           // Network-first for API calls, cache-first for the app shell
           if (e.request.url.includes('coinranking.com') || e.request.url.includes('googleapis.com')) {
             e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
@@ -443,7 +445,13 @@
       background: transparent; border: 1px solid var(--border); color: var(--muted);
       cursor: pointer; transition: all 0.15s;
     }
+    .sync-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+    @media (max-width: 480px) { .sync-tab { padding: 7px 8px; font-size: 0.74rem; white-space: nowrap; } }
     .sync-tab:hover { color: var(--text); border-color: var(--muted); }
+    .dot.warn { background: #f5b942; }
+    .cloud-info { font-size: 0.76rem; color: var(--muted); line-height: 1.6; margin-bottom: 10px; }
+    .cloud-info a { color: var(--accent); }
+    .cloud-check { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; color: var(--muted); margin: 10px 0 12px; cursor: pointer; }
     .sync-tab.active { background: var(--accent); border-color: var(--accent); color: #000; }
 
     /* STATS PANEL */
@@ -865,14 +873,62 @@
 ══════════════════════════════════════════ -->
 <div class="modal-overlay" id="mSync" onclick="bgClose(event,'mSync')">
   <div class="modal" style="max-width:520px">
-    <h2>⇅ Backup & Restore All Portfolios</h2>
+    <h2>⇅ Sync, Backup & Restore</h2>
 
     <!-- Tabs -->
-    <div style="display:flex;gap:6px;margin-bottom:18px">
+    <div class="sync-tabs">
+      <button class="sync-tab"        id="stab-cloud"   onclick="syncTab('cloud')">☁ Cloud</button>
       <button class="sync-tab active" id="stab-backup"  onclick="syncTab('backup')">📤 Backup</button>
       <button class="sync-tab"        id="stab-restore" onclick="syncTab('restore')">📥 Restore</button>
       <button class="sync-tab"        id="stab-qr"      onclick="syncTab('qr')">📱 QR</button>
       <button class="sync-tab"        id="stab-safety"  onclick="syncTab('safety')">🛡 Safety</button>
+    </div>
+
+    <!-- Cloud sync panel (GitHub Gist) -->
+    <div id="spanel-cloud" style="display:none">
+      <!-- Not connected -->
+      <div id="cloudSetup">
+        <p class="cloud-info">
+          Keeps your portfolios in sync between devices (e.g. phone ⇄ PC) through a <b>secret GitHub Gist</b>.
+          Changes upload automatically, and each device picks them up when you open or switch back to the app.
+        </p>
+        <p class="cloud-info">
+          1. <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=CryptoHodl%20sync" target="_blank" rel="noopener">Create a GitHub token</a>
+          with only the <b>gist</b> scope (set the expiration to “No expiration” if you don't want to renew it).<br>
+          2. Paste it below. Use the <b>same token</b> on every device and they'll all find the same gist.
+        </p>
+        <div class="fg">
+          <label>GitHub token</label>
+          <input id="cloudToken" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_…"
+                 onkeydown="if(event.key==='Enter')cloudConnect()"/>
+        </div>
+        <button class="btn-primary" id="cloudConnectBtn" style="width:100%" onclick="cloudConnect()">Connect</button>
+        <p class="cloud-info" style="margin-top:12px;font-size:0.68rem">
+          A secret gist isn't listed publicly, but anyone with its exact URL can read it. The token is stored only in this browser.
+        </p>
+      </div>
+
+      <!-- Connected -->
+      <div id="cloudConnected" style="display:none">
+        <div class="safety-card">
+          <div class="safety-status"><span class="dot" id="cloudDot"></span><span id="cloudStatus">Cloud sync</span></div>
+          <div class="cloud-info" id="cloudDetail"></div>
+          <div id="cloudConflict" style="display:none">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-primary" style="flex:1" onclick="cloudResolve(true)">Use cloud copy</button>
+              <button class="btn-ghost"   style="flex:1" onclick="cloudResolve(false)">Keep this device's</button>
+            </div>
+            <p class="cloud-info" style="margin:10px 0 0;font-size:0.68rem">
+              Either way nothing is lost: this device saves a snapshot first (🛡 Safety), and the gist keeps its revision history.
+            </p>
+          </div>
+        </div>
+        <label class="cloud-check"><input type="checkbox" id="cloudAuto" onchange="cloudSetAuto(this.checked)"/> Sync automatically</label>
+        <div style="display:flex;gap:8px">
+          <button class="btn-primary" id="cloudSyncBtn" style="flex:1" onclick="cloudSync()">Sync now</button>
+          <button class="btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="cloudDisconnect()">Disconnect</button>
+        </div>
+      </div>
     </div>
 
     <!-- Backup panel -->
@@ -1208,6 +1264,7 @@ function dataChanged() {
     takeSnapshot('auto');
     writeAutoBackup();
     renderBackupBanner();
+    if (cloudOn() && cloud.auto) cloudSync({ auto: true });
   }, 2000);
 }
 
@@ -1418,13 +1475,19 @@ function renderBackupBanner() {
   const hasData = Object.values(portfolios).some(p => (p.holdings || []).length);
   let html = '';
 
-  if (autoBackupState === 'needs-permission' && backupHandle) {
+  if (cloudState === 'conflict') {
+    html = `<div class="safety-banner">
+      <div class="bmsg">☁ <b>Sync conflict:</b> this device and the cloud copy both changed. Which one should win?</div>
+      <button class="btn-primary" onclick="cloudResolve(true)">Use cloud copy</button>
+      <button class="btn-ghost" onclick="cloudResolve(false)">Keep this device's</button>
+    </div>`;
+  } else if (autoBackupState === 'needs-permission' && backupHandle) {
     html = `<div class="safety-banner">
       <div class="bmsg">🛡 <b>Auto-backup is paused</b> — the browser needs you to re-grant file access.</div>
       <button class="btn-primary" onclick="reenableAutoBackup()">Re-enable</button>
       <button class="btn-ghost" onclick="disconnectAutoBackup()">Turn off</button>
     </div>`;
-  } else if (hasData && autoBackupState !== 'active') {
+  } else if (hasData && autoBackupState !== 'active' && !(cloudOn() && cloudState === 'idle')) {
     const last      = bmeta.lastBackupAt || 0;
     const changed   = (bmeta.lastChangeAt || 0) > last;
     const staleDays = last ? Math.floor((Date.now() - last) / ONE_DAY_MS) : Infinity;
@@ -1445,6 +1508,358 @@ function dismissBackupNudge() {
   saveBmeta();
   renderBackupBanner();
 }
+
+// ════════════════════════════════════════════════════════════════════
+//  CLOUD SYNC — one secret GitHub Gist shared by all your devices
+// ════════════════════════════════════════════════════════════════════
+// Change detection is content-based: we remember the fingerprint of the local
+// data and of the cloud data as of the last successful sync. On each sync:
+//   only local changed  → push      only cloud changed → pull (snapshot first)
+//   both changed        → conflict, the user picks which side wins
+const CLOUD_KEY = 'ch_cloud_v1';   // { token, gistId, auto, lastLocalFp, lastRemoteFp, lastSyncAt, lastRemoteFrom }
+const GIST_FILE = 'cryptohodl-sync.json';
+const DEFAULT_CUR = { uuid: 'yhjMzLPhuIDl', symbol: '$', code: 'USD' };
+
+let cloud = (() => { try { return JSON.parse(localStorage.getItem(CLOUD_KEY) || 'null') || {}; } catch { return {}; } })();
+let cloudState     = 'off';   // off | idle | syncing | conflict | error
+let cloudError     = '';
+let cloudRemote    = null;    // remote payload seen during the last sync (for conflict info)
+let cloudBusy      = null;    // in-flight sync promise
+let cloudAgain     = false;   // a sync was requested while one was running
+let cloudLastCheck = 0;
+
+function saveCloud() { localStorage.setItem(CLOUD_KEY, JSON.stringify(cloud)); }
+function cloudOn()   { return !!cloud.token; }
+
+function deviceLabel() {
+  const ua = navigator.userAgent;
+  if (/Android/i.test(ua))          return 'Android';
+  if (/iPhone|iPad|iPod/i.test(ua)) return 'iPhone';
+  if (/Windows/i.test(ua))          return 'Windows PC';
+  if (/Macintosh/i.test(ua))        return 'Mac';
+  if (/Linux|X11|CrOS/i.test(ua))   return 'Linux PC';
+  return 'another device';
+}
+
+// Key-order-independent fingerprint of the data worth syncing
+function portsFp(ports) {
+  const norm = {};
+  Object.keys(ports || {}).sort().forEach(id => {
+    const p = ports[id] || {};
+    norm[id] = { name: p.name || '', holdings: p.holdings || [], currency: p.currency || null };
+  });
+  return JSON.stringify(norm);
+}
+const countHoldings = ports => Object.values(ports || {}).reduce((n, p) => n + ((p && p.holdings) || []).length, 0);
+
+async function gh(path, opts = {}) {
+  const r = await fetch('https://api.github.com' + path, {
+    ...opts,
+    cache: 'no-store',
+    headers: {
+      'Accept': 'application/vnd.github+json',
+      'Authorization': 'Bearer ' + cloud.token,
+      ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+    },
+  });
+  if (!r.ok) {
+    const e = new Error(
+      r.status === 401 ? 'GitHub rejected the token. It may be expired or revoked.' :
+      r.status === 403 ? 'GitHub refused the request. Check that the token has the “gist” scope.' :
+      r.status === 404 ? 'Gist not found.' :
+      'GitHub error ' + r.status + '.');
+    e.status = r.status;
+    throw e;
+  }
+  return r.json();
+}
+
+// Returns the cloud payload, or null if no sync gist exists yet
+async function cloudFetchRemote(retried) {
+  if (!cloud.gistId) {
+    // Another device may already have created one with this account
+    for (let page = 1; page <= 5 && !cloud.gistId; page++) {
+      const list = await gh(`/gists?per_page=100&page=${page}`);
+      const hit  = list.find(g => g.files && g.files[GIST_FILE]);
+      if (hit) { cloud.gistId = hit.id; saveCloud(); }
+      if (list.length < 100) break;
+    }
+    if (!cloud.gistId) return null;
+  }
+  let g;
+  try { g = await gh('/gists/' + cloud.gistId); }
+  catch (e) {
+    if (e.status === 404 && !retried) {   // gist was deleted — start over
+      cloud.gistId = null; cloud.lastRemoteFp = null; saveCloud();
+      return cloudFetchRemote(true);
+    }
+    throw e;
+  }
+  const f = g.files && g.files[GIST_FILE];
+  if (!f) return null;
+  let text = f.content;
+  if (f.truncated) {
+    const r = await fetch(f.raw_url, { cache: 'no-store' });
+    if (!r.ok) throw new Error('Could not download the cloud copy (' + r.status + ').');
+    text = await r.text();
+  }
+  let data;
+  try { data = JSON.parse(text); } catch { throw new Error('The cloud copy is not valid JSON.'); }
+  if (!data || !data.portfolios || typeof data.portfolios !== 'object' || !Object.keys(data.portfolios).length) {
+    throw new Error('The cloud copy is not a CryptoHodl backup.');
+  }
+  return data;
+}
+
+async function cloudPush() {
+  // Capture data + fingerprint together so edits made mid-request aren't marked as synced
+  const ports   = cleanPortfolios();
+  const fp      = portsFp(ports);
+  const content = JSON.stringify({
+    version: 1, exportedAt: new Date().toISOString(), device: deviceLabel(),
+    activePortId, portfolios: ports,
+  }, null, 2);
+  const files = { [GIST_FILE]: { content } };
+  if (cloud.gistId) {
+    await gh('/gists/' + cloud.gistId, { method: 'PATCH', body: JSON.stringify({ files }) });
+  } else {
+    const g = await gh('/gists', { method: 'POST', body: JSON.stringify({
+      description: 'CryptoHodl portfolio sync (managed by the app, do not edit)', public: false, files,
+    }) });
+    cloud.gistId = g.id;
+  }
+  cloud.lastLocalFp  = cloud.lastRemoteFp = fp;
+  cloud.lastSyncAt   = Date.now();
+  cloud.lastRemoteFrom = deviceLabel();
+  saveCloud();
+  bmeta.lastBackupAt = Date.now();
+  saveBmeta();
+}
+
+// Replace local portfolios with the cloud copy. Returns the undo snapshot's timestamp.
+function cloudApply(data) {
+  takeSnapshot('before cloud sync');
+  const undoT = loadSnapshots()[0]?.t;
+  const old   = portfolios;
+  portfolios  = {};
+  Object.entries(data.portfolios).forEach(([id, p]) => {
+    portfolios[id] = {
+      name: p.name, holdings: p.holdings || [],
+      coinCache: (old[id] && old[id].coinCache) || {},   // keep cached prices for instant render
+      currency: p.currency || DEFAULT_CUR,
+    };
+  });
+  if (!portfolios[activePortId]) {
+    activePortId = portfolios[data.activePortId] ? data.activePortId : Object.keys(portfolios)[0];
+  }
+  localStorage.setItem(ACTIVE_KEY, activePortId);
+  holdings       = portfolios[activePortId].holdings;
+  coinCache      = portfolios[activePortId].coinCache;
+  activeCurrency = portfolios[activePortId].currency;
+  lastCleanFp    = JSON.stringify(cleanPortfolios());   // not a local edit — don't echo it back
+  savePortfolios();
+
+  const fp = portsFp(cleanPortfolios());
+  cloud.lastLocalFp    = fp;
+  cloud.lastRemoteFp   = portsFp(data.portfolios);
+  cloud.lastSyncAt     = Date.now();
+  cloud.lastRemoteFrom = data.device || '';
+  saveCloud();
+
+  renderPortSelect(); syncCurrencySelect(); renderAll();
+  if (apiKey) refreshPrices();
+  return undoT;
+}
+
+function setCloudState(s) {
+  const prev = cloudState;
+  cloudState = s;
+  renderCloudPanel();
+  if (s === 'conflict' || prev === 'conflict' || s === 'idle') renderBackupBanner();
+}
+
+function cloudSync(opts = {}) {
+  if (!cloudOn()) return Promise.resolve();
+  if (cloudBusy) { cloudAgain = true; return cloudBusy; }
+  cloudBusy = cloudRun(opts).finally(() => {
+    cloudBusy = null;
+    if (cloudAgain) { cloudAgain = false; cloudSync({ auto: true }); }
+  });
+  return cloudBusy;
+}
+
+async function cloudRun({ auto = false } = {}) {
+  cloudLastCheck = Date.now();
+  const wasConflict = cloudState === 'conflict';
+  setCloudState('syncing');
+  try {
+    const remote  = await cloudFetchRemote();
+    const local   = cleanPortfolios();
+    const localFp = portsFp(local);
+    cloudRemote   = remote;
+
+    if (!remote) {                                   // first device: create the gist
+      await cloudPush();
+      setCloudState('idle');
+      if (!auto) toast('☁ Cloud sync set up. Your portfolios were uploaded.', 'success');
+      return;
+    }
+
+    const remoteFp      = portsFp(remote.portfolios);
+    const firstSync     = !cloud.lastRemoteFp;
+    const localChanged  = localFp  !== cloud.lastLocalFp;
+    const remoteChanged = remoteFp !== cloud.lastRemoteFp;
+
+    if (localFp === remoteFp) {                      // already identical
+      cloud.lastLocalFp = cloud.lastRemoteFp = localFp;
+      cloud.lastSyncAt  = Date.now();
+      saveCloud();
+      setCloudState('idle');
+      if (!auto) toast('☁ Already up to date.', 'success');
+    } else if (!remoteChanged || (firstSync && !countHoldings(remote.portfolios) && countHoldings(local))) {
+      await cloudPush();
+      setCloudState('idle');
+      if (!auto) toast('☁ Your changes were uploaded.', 'success');
+    } else if (!localChanged || !countHoldings(local)) {
+      const undoT = cloudApply(remote);
+      setCloudState('idle');
+      const from = remote.device ? ' from ' + esc(remote.device) : '';
+      toast(`☁ Synced the latest changes${from}.`, 'success', {
+        duration: 8000,
+        ...(undoT ? { actionLabel: 'Undo', onAction: () => restoreSnapshot(undoT) } : {}),
+      });
+    } else {
+      setCloudState('conflict');
+      if (!wasConflict) toast('☁ This device and the cloud copy both changed. Pick which one to keep.', 'error', { duration: 8000 });
+    }
+  } catch (e) {
+    console.warn('Cloud sync failed:', e);
+    cloudError = e instanceof TypeError ? 'Couldn’t reach GitHub. Are you offline?' : e.message;
+    setCloudState(wasConflict ? 'conflict' : 'error');
+    if (!auto) toast('☁ Sync failed: ' + esc(cloudError), 'error');
+  }
+}
+
+async function cloudResolve(useCloud) {
+  if (cloudBusy) await cloudBusy;
+  setCloudState('syncing');
+  try {
+    if (useCloud) {
+      const remote = await cloudFetchRemote();
+      if (!remote) throw new Error('There is no cloud copy any more.');
+      const undoT = cloudApply(remote);
+      toast('☁ Replaced this device’s data with the cloud copy.', 'success', {
+        duration: 8000,
+        ...(undoT ? { actionLabel: 'Undo', onAction: () => restoreSnapshot(undoT) } : {}),
+      });
+    } else {
+      takeSnapshot('before cloud overwrite');
+      await cloudPush();
+      toast('☁ Uploaded this device’s data. Other devices will pick it up on their next sync.', 'success');
+    }
+    setCloudState('idle');
+  } catch (e) {
+    cloudError = e instanceof TypeError ? 'Couldn’t reach GitHub. Are you offline?' : e.message;
+    setCloudState('conflict');
+    toast('☁ ' + esc(cloudError), 'error');
+  }
+}
+
+async function cloudConnect() {
+  const input = document.getElementById('cloudToken');
+  const token = input.value.trim();
+  if (!token) { toast('Paste a GitHub token first.', 'error'); return; }
+  cloud = { token, gistId: null, auto: true };
+  saveCloud();
+  const btn = document.getElementById('cloudConnectBtn');
+  btn.disabled = true; btn.textContent = 'Connecting…';
+  await cloudSync();
+  btn.disabled = false; btn.textContent = 'Connect';
+  if (cloudState === 'error' && !cloud.gistId) {
+    // Never got as far as finding/creating the gist (bad token, offline) — undo the connect
+    cloud = {}; saveCloud(); cloudState = 'off';
+  } else {
+    input.value = '';
+  }
+  renderCloudPanel();
+}
+
+async function cloudDisconnect() {
+  if (!await confirmDialog({
+    title:   'Disconnect cloud sync?',
+    message: 'This device stops syncing and forgets the token. Your data here and the gist on GitHub are left untouched.',
+    okLabel: 'Disconnect',
+  })) return;
+  cloud = {}; saveCloud();
+  cloudState = 'off'; cloudRemote = null;
+  renderCloudPanel(); renderBackupBanner();
+  toast('Cloud sync disconnected.', 'info');
+}
+
+function cloudSetAuto(on) {
+  cloud.auto = on; saveCloud();
+  if (on) cloudSync({ auto: true });
+}
+
+function timeAgo(t) {
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 45)    return 'just now';
+  if (s < 3600)  return Math.round(s / 60) + ' min ago';
+  if (s < 86400) return Math.round(s / 3600) + ' h ago';
+  return new Date(t).toLocaleDateString();
+}
+
+function renderCloudPanel() {
+  const setup = document.getElementById('cloudSetup');
+  if (!setup) return;
+  const conn = document.getElementById('cloudConnected');
+  setup.style.display = cloudOn() ? 'none'  : 'block';
+  conn.style.display  = cloudOn() ? 'block' : 'none';
+  if (!cloudOn()) return;
+
+  const dot    = document.getElementById('cloudDot');
+  const stat   = document.getElementById('cloudStatus');
+  const detail = document.getElementById('cloudDetail');
+  const gistLink = cloud.gistId
+    ? ` · <a href="https://gist.github.com/${esc(cloud.gistId)}" target="_blank" rel="noopener">view gist</a>` : '';
+  const last = cloud.lastSyncAt ? 'Last synced ' + timeAgo(cloud.lastSyncAt) : 'Not synced yet';
+
+  document.getElementById('cloudConflict').style.display = cloudState === 'conflict' ? 'block' : 'none';
+  document.getElementById('cloudAuto').checked = !!cloud.auto;
+  document.getElementById('cloudSyncBtn').disabled = cloudState === 'syncing' || cloudState === 'conflict';
+
+  if (cloudState === 'syncing') {
+    dot.className = 'dot warn'; stat.textContent = 'Cloud sync: syncing…';
+    detail.innerHTML = last + gistLink;
+  } else if (cloudState === 'conflict') {
+    dot.className = 'dot warn'; stat.textContent = 'Cloud sync: conflict';
+    const r = cloudRemote;
+    const rDesc = r
+      ? `the cloud copy (${countHoldings(r.portfolios)} holdings${r.device ? ', from ' + esc(r.device) : ''}${r.exportedAt ? ', ' + timeAgo(Date.parse(r.exportedAt)) : ''})`
+      : 'the cloud copy';
+    detail.innerHTML = `This device (${countHoldings(cleanPortfolios())} holdings) and ${rDesc} were both changed since they last synced.` + gistLink;
+  } else if (cloudState === 'error') {
+    dot.className = 'dot'; stat.textContent = 'Cloud sync: failed';
+    detail.innerHTML = esc(cloudError) + '<br>' + last + gistLink;
+  } else {
+    dot.className = 'dot on'; stat.textContent = 'Cloud sync: on';
+    detail.innerHTML = last + (cloud.lastRemoteFrom ? ` (latest data from ${esc(cloud.lastRemoteFrom)})` : '') + gistLink;
+  }
+}
+
+// Pick up other devices' changes when the app comes back to the foreground,
+// and flush pending edits before it goes to the background (phones kill tabs).
+function cloudAutoCheck(minGapMs) {
+  if (!cloudOn() || !cloud.auto) return;
+  if (Date.now() - cloudLastCheck < minGapMs) return;
+  cloudSync({ auto: true });
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') { cloudAutoCheck(15000); return; }
+  if (cloudOn() && cloud.auto && portsFp(cleanPortfolios()) !== cloud.lastLocalFp) cloudSync({ auto: true });
+});
+window.addEventListener('focus', () => cloudAutoCheck(15000));
+setInterval(() => { if (document.visibilityState === 'visible') cloudAutoCheck(170000); }, 180000);
 
 // ── State ────────────────────────────────────────────────────────────
 let portfolios    = loadPortfolios();
@@ -2426,8 +2841,8 @@ async function runImport() {
 // ════════════════════════════════════════════════════════════════════
 function openSync() {
   document.getElementById('syncRestoreTA').value = '';
-  // Reset to backup tab
-  syncTab('backup');
+  // Cloud sync is the main way to move data between devices — open there
+  syncTab('cloud');
   // Populate QR portfolio selector
   const sel = document.getElementById('qrPortSelect');
   sel.innerHTML = '<option value="__all__">All portfolios</option>';
@@ -2444,11 +2859,12 @@ function openSync() {
 }
 
 function syncTab(name) {
-  ['backup','restore','qr','safety'].forEach(t => {
+  ['cloud','backup','restore','qr','safety'].forEach(t => {
     document.getElementById('spanel-' + t).style.display = t === name ? 'block' : 'none';
     document.getElementById('stab-'   + t).classList.toggle('active', t === name);
   });
   if (name === 'safety') renderSafetyPanel();
+  if (name === 'cloud')  renderCloudPanel();
   // Reset QR output when switching away
   if (name !== 'qr') {
     document.getElementById('qrOutput').style.display = 'none';
@@ -3185,6 +3601,7 @@ if (navigator.storage?.persist) {
   navigator.storage.persisted().then(p => { if (!p) navigator.storage.persist().catch(() => {}); });
 }
 initAutoBackup().then(renderBackupBanner);
+if (cloudOn()) { cloudState = 'idle'; if (cloud.auto) cloudSync({ auto: true }); }
 </script>
 </body>
 </html>

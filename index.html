@@ -717,6 +717,10 @@
   <div class="section-header">
     <div class="section-title">Holdings</div>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div class="range-tabs" id="viewTabs" title="Combine entries of the same coin held in different places">
+        <button class="range-tab active" data-v="each" onclick="setGrouped(false)">All entries</button>
+        <button class="range-tab" data-v="group" onclick="setGrouped(true)">Grouped</button>
+      </div>
       <input type="search" id="holdFilter" class="hold-filter" placeholder="🔍 Filter…"
         autocomplete="off" oninput="filterQ=this.value;renderTable()"/>
       <div style="font-family:var(--font-mono);font-size:0.71rem;color:var(--muted)" id="lastUp"></div>
@@ -1899,7 +1903,25 @@ let searchTimer = null;
 let sortKey = 'value';
 let sortDir = -1;       // -1 desc, 1 asc
 let filterQ = '';
+let grouped = false;    // group same-coin entries; always starts off (exploded view is default)
 let lastPx  = {};       // uuid → last rendered price, for flash-on-change
+
+function setGrouped(on) {
+  grouped = on;
+  document.querySelectorAll('#viewTabs .range-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.v === (on ? 'group' : 'each')));
+  renderTable();
+}
+
+// Clicking a grouped row: single entry → edit it; several → show them exploded
+function openGroup(uuid) {
+  const idxs = holdings.map((h, i) => h.uuid === uuid ? i : -1).filter(i => i >= 0);
+  if (idxs.length === 1) { openAdd(idxs[0]); return; }
+  const c = coinCache[uuid] || {};
+  filterQ = c.name || c.symbol || '';
+  document.getElementById('holdFilter').value = filterQ;
+  setGrouped(false);
+}
 
 function setSort(key) {
   if (sortKey === key) sortDir = -sortDir;
@@ -3405,6 +3427,21 @@ function renderTable() {
         || (h.description || '').toLowerCase().includes(q);
   });
 
+  // Group same-coin entries: sum amounts; cost only if every entry has one
+  if (grouped) {
+    const byCoin = new Map();
+    rows.forEach(h => {
+      const g = byCoin.get(h.uuid);
+      if (!g) { byCoin.set(h.uuid, { uuid: h.uuid, amount: h.amount, buyPrice: h.buyPrice || 0,
+                                     _costAll: !!h.buyPrice, _n: 1 }); return; }
+      g.amount += h.amount;
+      g.buyPrice += h.buyPrice || 0;
+      g._costAll = g._costAll && !!h.buyPrice;
+      g._n++;
+    });
+    rows = [...byCoin.values()].map(g => ({ ...g, buyPrice: g._costAll ? g.buyPrice : null }));
+  }
+
   // Sort
   const keyFns = {
     value: h => (coinCache[h.uuid]?.price || 0) * h.amount,
@@ -3459,7 +3496,10 @@ function renderTable() {
     const hasPx = !!c.price;
     const flash = hasPx && lastPx[h.uuid] != null && c.price !== lastPx[h.uuid]
       ? (c.price > lastPx[h.uuid] ? ' pxup' : ' pxdn') : '';
-    return `<tr style="cursor:pointer" onclick="openAdd(${h._i})" title="Click to edit">
+    const multi = grouped && h._n > 1;
+    const click = grouped ? `openGroup('${esc(h.uuid)}')` : `openAdd(${h._i})`;
+    const tip   = multi ? `${h._n} entries — click to show them` : 'Click to edit';
+    return `<tr style="cursor:pointer" onclick="${click}" title="${tip}">
       <td>
         <div class="coin-info">
           ${icoHtml(c, 36)}
@@ -3467,7 +3507,7 @@ function renderTable() {
             <div class="cname">${esc(c.name || h.uuid)}</div>
             ${hasPx ? `<div class="csym${flash}">${sym}${fmtP(c.price)}</div>`
                     : '<div class="skel" style="width:56px;height:10px;margin-top:4px"></div>'}
-            <div class="cdesc">${fmtA(h.amount)} ${esc(c.symbol||'')}</div>
+            <div class="cdesc">${fmtA(h.amount)} ${esc(c.symbol||'')}${multi ? ` · ${h._n} places` : ''}</div>
           </div>
         </div>
       </td>
